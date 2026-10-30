@@ -68,9 +68,24 @@ button{font:inherit;color:inherit;touch-action:manipulation}
 .hint{position:absolute;left:10px;right:10px;bottom:10px;margin:auto;max-width:360px;background:rgba(14,18,24,.88);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--muted);text-align:center;backdrop-filter:blur(6px)}
 .hint b{color:var(--fg)}
 
-.transport{display:flex;align-items:center;gap:8px}
-.tc{font-family:var(--f-cond);font-weight:700;font-size:20px;font-variant-numeric:tabular-nums;letter-spacing:.02em;margin-left:4px}
-.tc span{color:var(--dim)}
+.transport{display:flex;align-items:center;justify-content:center;gap:8px}
+.ov{position:absolute;top:8px;z-index:3;display:flex;gap:6px}
+.ov.tl{left:8px}.ov.tr{right:8px}
+.chip{background:rgba(10,12,16,.72);border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:8px;min-height:32px;min-width:36px;padding:4px 9px;font-family:var(--f-cond);font-weight:700;font-size:15px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px)}
+.chip svg{width:18px;height:18px}
+.chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tc{cursor:default;font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:.02em}
+.tc span{color:rgba(255,255,255,.55);margin-left:.3em}
+body.theater .toast{bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:90}
+.round.sm{width:38px;height:38px}.round.sm svg{width:18px;height:18px}
+#cv{cursor:pointer}
+body.theater{overflow:hidden}
+body.theater .stage{position:fixed;left:0;right:0;top:0;height:calc(100% - 76px - env(safe-area-inset-bottom,0px));z-index:60;border:0;border-radius:0;min-height:0;padding:0;background:#000}
+body.theater #cv{max-height:calc(100% - 16px);max-width:calc(100% - 16px)}
+body.theater .ov{top:calc(10px + env(safe-area-inset-top,0px))}
+body.theater .ov.tl{left:max(10px,env(safe-area-inset-left,0px))}body.theater .ov.tr{right:max(10px,env(safe-area-inset-right,0px))}
+body.theater .hint{display:none}
+body.theater .transport{position:fixed;left:0;right:0;bottom:0;z-index:61;background:#000;padding:12px max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
 .round{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--panel);display:grid;place-items:center;cursor:pointer;padding:0}
 .round.big{width:52px;height:52px;background:var(--fg);color:var(--bg);border-color:var(--fg)}
 .round svg{width:20px;height:20px}
@@ -155,8 +170,10 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
   #cv{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:calc(100% - 12px);max-height:calc(100% - 12px)}
   .hint{font-size:12px;padding:6px 10px;bottom:8px}
   .transport{gap:6px}
-  .round{width:40px;height:40px}.round.big{width:46px;height:46px}
-  .tc{font-size:17px;white-space:nowrap}
+  .transport{gap:5px}
+  .round{width:38px;height:38px}.round.big{width:48px;height:48px}.round svg{width:18px;height:18px}
+  .round.sm{width:36px;height:36px}
+  .top{gap:8px}
   .tl-wrap{padding:6px 0 4px;flex:0 0 auto}
   .zoomrow{padding:4px 12px 0}
   .zoomrow label{display:none}
@@ -194,6 +211,7 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
 <div id="app">
   <header class="top">
     <div class="brand"><i aria-hidden="true"></i>Moviola <span class="save" id="saveState" aria-live="polite"></span></div>
+    <button class="round sm" id="btnUndo" aria-label="Annulla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
     <button class="btn" id="btnProjects">Progetti</button>
     <button class="btn primary" id="btnExport">Esporta</button>
   </header>
@@ -202,15 +220,22 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
     <div class="main">
       <section class="stage">
         <canvas id="cv"></canvas>
+        <div class="ov tl"><div class="chip tc" id="tc">0:00.00 <span>/ 0:00.00</span></div></div>
+        <div class="ov tr">
+          <button class="chip" id="btnSpeed" aria-label="Velocità anteprima">1×</button>
+          <button class="chip" id="btnFull" aria-label="Schermo intero"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" id="icoFull"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+        </div>
         <div class="hint" id="hint">Progetto di esempio. <b>Tocca + Media</b> per caricare i tuoi video, foto o la musica.</div>
       </section>
 
       <div class="transport">
-        <button class="round" id="btnStart" aria-label="Torna all'inizio"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+        <button class="round" id="btnStart" aria-label="Vai all'inizio"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 5h2.2v14H5zM19 5v14L8.5 12z"/></svg></button>
+        <button class="round" id="btnBack5" aria-label="Indietro 5 secondi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><text x="12" y="15.5" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="Barlow,sans-serif">5</text></svg></button>
+        <button class="round" id="btnPrevF" aria-label="Fotogramma precedente"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h2v14H7zM18 5v14l-8-7z"/></svg></button>
         <button class="round big" id="btnPlay" aria-label="Riproduci"><svg viewBox="0 0 24 24" fill="currentColor" id="icoPlay"><path d="M7 4.5v15l13-7.5z"/></svg></button>
-        <div class="tc" id="tc">0:00.00 <span>/ 0:00.00</span></div>
-        <div class="spacer"></div>
-        <button class="round" id="btnUndo" aria-label="Annulla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+        <button class="round" id="btnNextF" aria-label="Fotogramma successivo"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 5h2v14h-2zM6 5v14l8-7z"/></svg></button>
+        <button class="round" id="btnFwd5" aria-label="Avanti 5 secondi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/><text x="12" y="15.5" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="Barlow,sans-serif">5</text></svg></button>
+        <button class="round" id="btnEnd" aria-label="Vai alla fine"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.8 5H19v14h-2.2zM5 5v14l10.5-7z"/></svg></button>
       </div>
 
       <div class="tl-wrap">
@@ -678,7 +703,10 @@ async function importFiles(files){
 }
 
 /* ---------- playback ---------- */
-let clock = { t0:0, p0:0 }, activeClipId = null, raf = 0;
+let clock = { t0:0, p0:0 }, activeClipId = null, raf = 0, rate = 1;
+function applyRate(){
+  for (const m of media.values()) if (m.type === 'video' || m.type === 'audio'){ try { m.el.playbackRate = rate; } catch(e){} }
+}
 function videoEls(){ return [...media.values()].filter(m => m.type === 'video').map(m => m.el); }
 function pauseMedia(){ videoEls().forEach(v => { if (!v.paused) v.pause(); }); if (P.music){ const m = media.get(P.music.mediaId); if (m && !m.el.paused) m.el.pause(); } activeClipId = null; }
 function play(){
@@ -699,7 +727,7 @@ function tick(now){
     if (el.ended || el.currentTime >= c.out - 0.02) T = cur.start + cur.len + 0.001;
     else if (!el.paused && !el.seeking && el.readyState >= 2) T = Math.max(T, cur.start + (el.currentTime - c.in));
     clock = { t0:now, p0:T };
-  } else T = clock.p0 + (now - clock.t0)/1000;
+  } else T = clock.p0 + (now - clock.t0)/1000*rate;
   if (T >= total()){ T = total(); playing = false; pauseMedia(); setPlayIcon(); }
   else syncMedia(false);
   draw(); updateTime(); followPlayhead();
@@ -715,7 +743,7 @@ function syncMedia(force){
       el.muted = !(c.volume > 0); try { el.volume = clamp(c.volume*a, 0, 1); } catch(e){}
       if (activeClipId !== c.id || force){
         videoEls().forEach(v => { if (v !== el && !v.paused) v.pause(); });
-        activeClipId = c.id; el.currentTime = target; el.play().catch(()=>{});
+        activeClipId = c.id; el.currentTime = target; try { el.playbackRate = rate; } catch(e){} el.play().catch(()=>{});
       } else {
         if (el.paused && !el.ended) el.play().catch(()=>{});
       }
@@ -734,7 +762,7 @@ function syncMedia(force){
         const a = fo > 0 && T > end - fo ? clamp((end - T)/fo, 0, 1) : 1;
         try { el.volume = clamp(P.music.volume*a, 0, 1); } catch(e){}
         if (force || Math.abs(el.currentTime - target) > 0.5) el.currentTime = target;
-        if (el.paused) el.play().catch(()=>{});
+        if (el.paused){ try { el.playbackRate = rate; } catch(e){} el.play().catch(()=>{}); }
       }
     }
   }
@@ -1153,6 +1181,30 @@ $('#tCard').onclick = addCard;
 $('#tDel').onclick = deleteSel;
 $('#btnPlay').onclick = () => playing ? pause() : play();
 $('#btnStart').onclick = () => { pause(); setT(0); scroller.scrollLeft = 0; };
+$('#btnEnd').onclick = () => { pause(); setT(total()); followPlayhead(); };
+$('#btnBack5').onclick = () => { setT(T - 5); followPlayhead(); };
+$('#btnFwd5').onclick = () => { setT(Math.min(T + 5, Math.max(0, total() - 0.01))); followPlayhead(); };
+$('#btnPrevF').onclick = () => { pause(); setT(T - 1/30); followPlayhead(); };
+$('#btnNextF').onclick = () => { pause(); setT(T + 1/30); followPlayhead(); };
+cv.addEventListener('click', () => playing ? pause() : play());
+const RATES = [[1,'1×'],[0.5,'½×'],[0.25,'¼×']];
+$('#btnSpeed').onclick = () => {
+  const i = (RATES.findIndex(r => r[0] === rate) + 1) % RATES.length;
+  rate = RATES[i][0];
+  const b = $('#btnSpeed'); b.textContent = RATES[i][1]; b.classList.toggle('on', rate !== 1);
+  b.setAttribute('aria-label', `Velocità anteprima ${RATES[i][1]}`);
+  applyRate();
+  if (playing) clock = { t0:performance.now(), p0:T };
+  toast(rate === 1 ? 'Velocità normale' : `Moviola ${RATES[i][1]} (solo anteprima)`);
+};
+function toggleTheater(on){
+  const v = on ?? !document.body.classList.contains('theater');
+  document.body.classList.toggle('theater', v);
+  $('#icoFull').innerHTML = v ? '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>' : '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>';
+  $('#btnFull').setAttribute('aria-label', v ? 'Esci da schermo intero' : 'Schermo intero');
+  requestDraw();
+}
+$('#btnFull').onclick = () => toggleTheater();
 $('#btnUndo').onclick = undo;
 $('#btnUndo').disabled = true;
 
@@ -1165,6 +1217,8 @@ function setFormat(f){
 
 document.addEventListener('keydown', e => {
   if (e.target.matches('input,textarea,select') || !$('#scrim').hidden) return;
+  if (e.key === 'Escape' && document.body.classList.contains('theater')){ toggleTheater(false); return; }
+  if (e.key === 'f' || e.key === 'F'){ toggleTheater(); return; }
   if (e.code === 'Space'){ e.preventDefault(); playing ? pause() : play(); }
   else if (e.key === 's' || e.key === 'S'){ split(); }
   else if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSel(); }
