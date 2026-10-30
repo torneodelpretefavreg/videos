@@ -184,7 +184,7 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
   .zoomrow label{display:none}
   .zoomrow input{max-width:none;height:22px}
   .tools{flex:0 0 auto;gap:4px;overflow:visible}
-  .tool{flex:1 1 0;min-width:0;padding:7px 2px 6px;font-size:10px;letter-spacing:.03em;gap:2px}
+  .tool{flex:1 1 0;min-width:0;padding:7px 1px 6px;font-size:11px;letter-spacing:0;text-transform:none;gap:2px;overflow:hidden;white-space:nowrap}
   .tool svg{width:19px;height:19px}
   .insp{display:none;flex:0 0 auto;max-height:40%;overflow:auto;padding:12px;gap:12px;border-radius:12px}
   body.has-sel .insp{display:flex}
@@ -196,6 +196,19 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
   .insp h2 .only-m{margin-left:auto}
   .sheet{max-height:88%}
 }
+.markbar{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:4;display:flex;gap:6px;background:rgba(10,12,16,.85);border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:6px;backdrop-filter:blur(6px);max-width:calc(100% - 16px)}
+.markbar .chip{min-height:38px;padding:4px 11px;white-space:nowrap}
+.markbar .chip.go{background:var(--rec);border-color:var(--rec)}
+.markbar .chip.armed{background:#fff;color:#000;border-color:#fff}
+.markbar .chip.done{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+body.marking .hint{display:none}
+body.theater .markbar{bottom:16px}
+.hltext{font-family:var(--f-cond);font-size:18px;font-weight:600;min-height:150px;line-height:1.45;font-variant-numeric:tabular-nums}
+.hlsum{font-family:var(--f-cond);font-weight:700;font-size:16px}
+.hlsum.bad{color:#ff9c94}
+.chk{display:flex;gap:10px;align-items:center;font-weight:500;cursor:pointer}
+.chk input{width:20px;height:20px;accent-color:var(--accent)}
+select.tin{appearance:auto}
 /* export sheet */
 .scrim{position:fixed;inset:0;background:rgba(3,5,8,.72);z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:0 max(0px,env(safe-area-inset-right,0px)) 0 max(0px,env(safe-area-inset-left,0px))}
 @media (min-width:640px){.scrim{align-items:center}}
@@ -230,6 +243,12 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
           <button class="chip" id="btnSpeed" aria-label="Velocità anteprima">1×</button>
           <button class="chip" id="btnFull" aria-label="Schermo intero"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" id="icoFull"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
         </div>
+        <div class="markbar" id="markbar" hidden>
+          <button class="chip go" id="mkA">Inizio</button>
+          <button class="chip go" id="mkB">Fine</button>
+          <button class="chip go" id="mk10">−10 s</button>
+          <button class="chip done" id="mkDone">Fatto · 0</button>
+        </div>
         <div class="hint" id="hint">Progetto di esempio. <b>Tocca + Media</b> per caricare i tuoi video, foto o la musica.</div>
       </section>
 
@@ -258,6 +277,7 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
       </div>
       <div class="tools">
         <button class="tool" id="tMedia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Media</button>
+        <button class="tool" id="tHL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Azioni</button>
         <button class="tool" id="tSplit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>Dividi</button>
         <button class="tool" id="tText"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>Testo</button>
         <button class="tool" id="tCard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h10"/></svg>Cartello</button>
@@ -1212,6 +1232,155 @@ $('#fileLogo').onchange = async e => {
   try { const m = await loadImage(f); media.set(m.id, m); await storeFile(m); snapshot(); P.logo = { mediaId:m.id, corner:P.logo ? P.logo.corner : 'tr', size:P.logo ? P.logo.size : 0.16, opacity:1 }; sel = { type:'logo', id:'logo' }; refresh(true); }
   catch(err){ toast('Immagine non valida. Usa un PNG con sfondo trasparente.', 4000); }
 };
+
+/* ---------- highlights automatici ---------- */
+const fmtHL = t => { t = Math.max(0, Math.round(t*10)/10); const h = Math.floor(t/3600), m = Math.floor(t%3600/60), sec = t%60;
+  const ss = (Number.isInteger(sec) ? String(sec) : sec.toFixed(1)).padStart(Number.isInteger(sec) ? 2 : 4, '0');
+  return h ? `${h}:${String(m).padStart(2,'0')}:${ss}` : `${m}:${ss}`; };
+function parseTime(str){
+  str = String(str).trim().replace(',', '.'); if (!str) return NaN;
+  const p = str.split(':'); if (p.length > 3) return NaN;
+  const n = p.map(Number); if (n.some(v => isNaN(v) || v < 0)) return NaN;
+  return n.reduce((a,v) => a*60 + v, 0);
+}
+function parseHL(text, maxDur){
+  const ok = [], bad = [];
+  String(text || '').split('\n').forEach((raw, i) => {
+    const line = raw.trim(); if (!line || line.startsWith('#')) return;
+    let m = line.match(/^([\d:.,]+)\s*\+\s*([\d.,]+)\s*(.*)$/), a, b, label;
+    if (m){ a = parseTime(m[1]); b = a + parseTime(m[2]); label = m[3]; }
+    else {
+      m = line.match(/^([\d:.,]+)\s*(?:-|–|—|→|>)\s*([\d:.,]+)\s*(.*)$/);
+      if (!m){ bad.push(i+1); return; }
+      a = parseTime(m[1]); b = parseTime(m[2]); label = m[3];
+    }
+    if (isNaN(a) || isNaN(b) || b - a < 0.3 || (maxDur && a >= maxDur)){ bad.push(i+1); return; }
+    if (maxDur) b = Math.min(b, maxDur);
+    ok.push({ a, b, label:(label || '').replace(/^[-–:·\s]+/, '').trim() });
+  });
+  return { ok, bad };
+}
+const videoMedia = () => [...media.values()].filter(m => m.type === 'video');
+function hlSourceMedia(){
+  const v = videoMedia();
+  return v.find(m => m.id === P.hlSource) || v.sort((x,y) => y.duration - x.duration)[0] || null;
+}
+function srcAt(){
+  const o = clipAt(T);
+  if (!o || o.c.kind !== 'video') return null;
+  return { mediaId:o.c.mediaId, t:clamp(o.c.in + (T - o.start), o.c.in, o.c.out) };
+}
+const hlCount = () => parseHL(P.hlText).ok.length;
+let markA = null;
+function addHLLine(mid, a, b){
+  if (P.hlSource && P.hlSource !== mid && (P.hlText || '').trim() && media.has(P.hlSource)){
+    toast('Le azioni devono venire tutte dallo stesso video'); return false;
+  }
+  P.hlSource = mid;
+  const cur = (P.hlText || '').replace(/\s+$/, '');
+  P.hlText = (cur ? cur + '\n' : '') + `${fmtHL(a)}-${fmtHL(b)} `;
+  scheduleSave(); updateMarkBar();
+  toast(`Azione ${hlCount()} segnata: ${fmtHL(a)} → ${fmtHL(b)}`);
+  return true;
+}
+function updateMarkBar(){
+  $('#mkDone').textContent = `Fatto · ${hlCount()}`;
+  const b = $('#mkA'); b.classList.toggle('armed', !!markA); b.textContent = markA ? `Da ${fmtHL(markA.t)}` : 'Inizio';
+}
+function setMarking(on){
+  document.body.classList.toggle('marking', on);
+  $('#markbar').hidden = !on; markA = null;
+  if (on){ updateMarkBar(); toast('Guarda la partita e segna le azioni. Con −10 s salvi gli ultimi 10 secondi.', 4000); }
+}
+$('#mkA').onclick = () => {
+  const s = srcAt(); if (!s){ toast('Porta la linea rossa su una clip video'); return; }
+  markA = s; updateMarkBar(); toast(`Inizio a ${fmtHL(s.t)}: ora tocca Fine`);
+};
+$('#mkB').onclick = () => {
+  const s = srcAt(); if (!s){ toast('Porta la linea rossa su una clip video'); return; }
+  if (!markA){ toast('Tocca prima Inizio'); return; }
+  if (s.mediaId !== markA.mediaId || s.t < markA.t + 0.3){ toast('La fine deve venire dopo l’inizio'); return; }
+  if (addHLLine(s.mediaId, markA.t, s.t)){ markA = null; updateMarkBar(); }
+};
+$('#mk10').onclick = () => {
+  const s = srcAt(); if (!s){ toast('Porta la linea rossa su una clip video'); return; }
+  addHLLine(s.mediaId, Math.max(0, s.t - 10), s.t);
+};
+$('#mkDone').onclick = () => { setMarking(false); pause(); openHL(); };
+
+function openHL(){
+  pause(); $('#toast').hidden = true;
+  const vids = videoMedia();
+  if (!vids.length){ toast('Carica prima il video della partita con + Media', 3500); return; }
+  const src = hlSourceMedia();
+  P.hlOpts = Object.assign({ intro:true, labels:true, fade:true, fit:'contain' }, P.hlOpts || {});
+  const o = P.hlOpts;
+  scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="hlT">
+    <h3 id="hlT">Highlights automatici</h3>
+    ${vids.length > 1 ? `<div class="grp"><label class="lab" for="hlSrc">Video sorgente</label><select class="tin" id="hlSrc">${vids.map(m => `<option value="${m.id}" ${m === src ? 'selected' : ''}>${esc(m.name)} · ${fmtHL(m.duration)}</option>`).join('')}</select></div>` : `<p class="note">Video: <b>${esc(src.name)}</b> · ${fmtHL(src.duration)}</p>`}
+    <div class="grp"><label class="lab" for="hlText">Azioni da prendere</label>
+      <textarea class="hltext" id="hlText" spellcheck="false" placeholder="12:30-12:45 Gol Rossi&#10;18:02-18:15&#10;25:40 +12 Parata di Bovi">${esc(P.hlText || '')}</textarea>
+      <p class="note">Una riga per azione: <b>inizio-fine</b> e, se vuoi, la scritta da mostrare. Con <b>25:40 +12</b> prendi 12 secondi da 25:40. I tempi sono quelli della partita originale.</p>
+      <div class="hlsum" id="hlSum"></div></div>
+    <button class="btn" id="hlMark">Segna guardando la partita</button>
+    <div class="grp"><div class="lab">Inquadratura</div>${seg('hlfit',[['contain','Adatta · tutto il campo'],['cover','Riempi · ritaglia']],o.fit)}</div>
+    <label class="chk"><input type="checkbox" id="hlIntro" ${o.intro ? 'checked' : ''}> Cartello iniziale con il titolo del progetto</label>
+    <label class="chk"><input type="checkbox" id="hlLabels" ${o.labels ? 'checked' : ''}> Scritta in sovrimpressione per ogni azione</label>
+    <label class="chk"><input type="checkbox" id="hlFade" ${o.fade ? 'checked' : ''}> Dissolvenza tra le azioni</label>
+    <p class="note">La timeline attuale viene sostituita; musica e logo restano. Se cambi idea c’è Annulla.</p>
+    <div class="row"><button class="btn" id="hlClose">Chiudi</button><button class="btn primary" id="hlGo">Crea highlights</button></div>
+  </div>`;
+  scrim.hidden = false;
+  const ta = $('#hlText');
+  const sum = () => {
+    const m = hlSourceMedia(); const r = parseHL(ta.value, m && m.duration);
+    const tot = r.ok.reduce((a,x) => a + x.b - x.a, 0) + ($('#hlIntro').checked && r.ok.length ? 2.5 : 0);
+    const el = $('#hlSum');
+    el.className = 'hlsum' + (r.bad.length ? ' bad' : '');
+    el.textContent = r.bad.length ? `Non capisco ${r.bad.length === 1 ? 'la riga' : 'le righe'} ${r.bad.join(', ')}` + (r.ok.length ? ` · ${r.ok.length} azioni ok` : '')
+      : r.ok.length ? `${r.ok.length} ${r.ok.length === 1 ? 'azione' : 'azioni'} · video finale ${fmtT(tot).replace(/\.\d+$/,'')}` : 'Nessuna azione ancora';
+    $('#hlGo').disabled = !r.ok.length;
+  };
+  ta.addEventListener('input', () => { P.hlText = ta.value; scheduleSave(); sum(); });
+  const srcSel = $('#hlSrc'); if (srcSel) srcSel.onchange = () => { P.hlSource = srcSel.value; scheduleSave(); sum(); };
+  ['hlIntro','hlLabels','hlFade'].forEach(id => $('#'+id).onchange = e => { o[{hlIntro:'intro',hlLabels:'labels',hlFade:'fade'}[id]] = e.target.checked; scheduleSave(); sum(); });
+  scrim.querySelector('[data-seg="hlfit"]').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; o.fit = b.dataset.v; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); scheduleSave(); });
+  $('#hlClose').onclick = closeExport;
+  $('#hlMark').onclick = () => {
+    closeExport();
+    const m = hlSourceMedia();
+    if (!P.clips.some(c => c.mediaId === m.id)){
+      snapshot(); const c = { id:uid(), kind:'video', mediaId:m.id, name:m.name, in:0, out:m.duration, fit:o.fit, zoom:1, panX:0, panY:0, volume:1, fadeIn:0, fadeOut:0 };
+      P.clips.push(c); refresh(true);
+    }
+    P.hlSource = m.id; setMarking(true);
+  };
+  $('#hlGo').onclick = () => { buildHighlights(); closeExport(); };
+  sum();
+}
+function buildHighlights(){
+  const m = hlSourceMedia(); if (!m) return;
+  const r = parseHL(P.hlText, m.duration); if (!r.ok.length) return;
+  const o = P.hlOpts; const prev = P.clips.find(c => c.mediaId === m.id);
+  snapshot();
+  const clips = [], texts = []; let t = 0;
+  if (o.intro){
+    clips.push({ id:uid(), kind:'card', dur:2.5, color:'#0f2c5c', fadeIn:0, fadeOut:o.fade ? 0.4 : 0 });
+    texts.push({ id:uid(), text:(P.name && !/^Progetto del /.test(P.name) ? P.name : 'Highlights'), style:'title', size:110, y:0.47, color:'#ffffff', bg:'#e63946', anim:'pop', start:0.15, end:2.5 });
+    t = 2.5;
+  }
+  for (const x of r.ok){
+    const len = x.b - x.a;
+    clips.push({ id:uid(), kind:'video', mediaId:m.id, name:m.name, in:x.a, out:x.b, fit:o.fit, zoom:prev ? prev.zoom : 1, panX:prev ? prev.panX : 0, panY:prev ? prev.panY : 0, volume:prev ? prev.volume : 1, fadeIn:o.fade ? 0.3 : 0, fadeOut:o.fade ? 0.3 : 0 });
+    if (o.labels && x.label) texts.push({ id:uid(), text:x.label, style:'lower', size:72, y:0.82, color:'#ffffff', bg:'#f5c542', anim:'slide', start:t + 0.3, end:t + Math.max(0.8, Math.min(3.5, len - 0.2)) });
+    t += len;
+  }
+  P.clips = clips; P.texts = texts; P.example = false; sel = null; T = 0;
+  scroller.scrollLeft = 0; pps = 0; refresh(true); scheduleSave();
+  toast(`Highlights pronti: ${r.ok.length} azioni, ${fmtT(t).replace(/\.\d+$/,'')}. Premi play per vederli.`, 4000);
+}
+$('#tHL').onclick = () => { if (document.body.classList.contains('marking')) setMarking(false); openHL(); };
+
 $('#tSplit').onclick = split;
 $('#tText').onclick = addText;
 $('#tCard').onclick = addCard;
