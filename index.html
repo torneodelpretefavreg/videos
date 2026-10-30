@@ -606,15 +606,18 @@ function loadVideo(file, fixedId){
     const el = document.createElement('video');
     el.playsInline = true; el.setAttribute('playsinline',''); el.muted = true; el.preload = 'auto'; el.crossOrigin = 'anonymous';
     el.src = url; pool.appendChild(el);
-    const to = setTimeout(() => rej(new Error('timeout')), 20000);
+    try { el.load(); } catch(e){}
+    // Safari su iPhone a volte non legge il video finché non parte: lo avvio muto e lo fermo subito
+    const kick = setTimeout(() => { if (el.readyState < 1){ const p = el.play(); if (p && p.then) p.then(() => el.pause()).catch(()=>{}); } }, 1200);
+    const to = setTimeout(() => { clearTimeout(kick); rej(new Error('timeout')); }, 90000);
     el.addEventListener('loadedmetadata', () => {
-      clearTimeout(to);
+      clearTimeout(to); clearTimeout(kick); if (!el.paused) el.pause();
       const m = { id:fixedId || uid(), type:'video', name:file.name, url, el, file, w:el.videoWidth, h:el.videoHeight, duration:isFinite(el.duration) ? el.duration : 10, thumb:'' };
       el.addEventListener('seeked', requestDraw);
       el.addEventListener('loadeddata', requestDraw);
       res(m);
     }, { once:true });
-    el.addEventListener('error', () => { clearTimeout(to); rej(new Error('decode')); }, { once:true });
+    el.addEventListener('error', () => { clearTimeout(to); clearTimeout(kick); rej(new Error('decode')); }, { once:true });
   });
 }
 function loadImage(file, fixedId){
@@ -653,6 +656,7 @@ async function importFiles(files){
   let added = 0, failed = [], relinked = 0;
   toast('Caricamento in corso…', 0);
   for (const f of files){
+    if (f.size > 300*1048576) toast(`Apro ${f.name} (${(f.size/1073741824).toFixed(1).replace('.',',')} GB)…`, 0);
     try {
       const pm = pendingRelink.find(p => p.name === f.name && p.size === f.size) || pendingRelink.find(p => p.name === f.name);
       if (pm){
