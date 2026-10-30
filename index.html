@@ -1,3 +1,16 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0e1218">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Moviola">
+<style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}</style>
+</head>
+<body>
 <title>Moviola</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,7 +32,7 @@
 html,body{height:100%}
 body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:14px;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
 *{box-sizing:border-box}
-button{font:inherit;color:inherit}
+button{font:inherit;color:inherit;touch-action:manipulation}
 #app{max-width:1320px;margin:0 auto;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));padding-block:8px 24px;display:flex;flex-direction:column;gap:10px}
 @media (min-width:600px){#app{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}}
 
@@ -46,10 +59,9 @@ button{font:inherit;color:inherit}
 .btn.danger{color:#ff8f86}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-.main{display:flex;flex-direction:column;gap:10px;min-width:0}
+.main{display:flex;flex-direction:column;gap:8px;min-width:0}
 .stage{background:#05070a;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;padding:10px;position:relative;min-height:200px}
-#cv{display:block;max-width:100%;max-height:44vh;width:auto;height:auto;border-radius:4px;background:#000}
-@media (min-width:960px){#cv{max-height:56vh}}
+#cv{display:block;max-width:100%;max-height:56vh;width:auto;height:auto;border-radius:4px;background:#000}
 .hint{position:absolute;left:10px;right:10px;bottom:10px;margin:auto;max-width:360px;background:rgba(14,18,24,.88);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--muted);text-align:center;backdrop-filter:blur(6px)}
 .hint b{color:var(--fg)}
 
@@ -89,7 +101,7 @@ button{font:inherit;color:inherit}
 .h::before{content:"";position:absolute;left:7px;top:35%;bottom:35%;width:2px;border-radius:1px;background:var(--accent-ink)}
 .h.l{left:-2px;border-radius:5px 0 0 5px}.h.r{right:-2px;border-radius:0 5px 5px 0}
 .sel>.h{display:block}
-.bar{position:absolute;top:0;bottom:0;border-radius:5px;border:2px solid transparent;cursor:pointer;font-family:var(--f-cond);font-weight:700;font-size:12px;padding:0 8px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{position:absolute;top:0;bottom:0;box-sizing:border-box;border-radius:5px;border:2px solid transparent;cursor:pointer;font-family:var(--f-cond);font-weight:700;font-size:12px;padding:0 8px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar.text{background:var(--text-bar);color:#1b1503}
 .bar.text.sel{touch-action:none}
 .bar.audio{background:color-mix(in srgb,var(--audio) 70%,#000);color:#e6fffb;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.18) 0 2px,transparent 2px 5px);background-size:100% 40%;background-repeat:no-repeat;background-position:bottom}
@@ -126,6 +138,39 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
   .insp{position:sticky;top:calc(env(safe-area-inset-top,0px) + 8px);max-height:calc(100vh - 24px);overflow:auto}
 }
 
+
+/* ---- telefono: schermo unico, come un'app ---- */
+.only-m{display:none}
+@media (max-width:959px){
+  html,body{height:100%;overflow:hidden}
+  #app{height:100%;padding-block:6px 4px;gap:6px}
+  .brand{font-size:20px}
+  .top .btn{min-height:36px;padding:6px 12px}
+  .layout{flex:1;min-height:0}
+  .main{flex:1;min-height:0;gap:6px}
+  .stage{flex:1 1 auto;min-height:150px;padding:0}
+  #cv{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:calc(100% - 12px);max-height:calc(100% - 12px)}
+  .hint{font-size:12px;padding:6px 10px;bottom:8px}
+  .transport{gap:6px}
+  .round{width:40px;height:40px}.round.big{width:46px;height:46px}
+  .tc{font-size:17px;white-space:nowrap}
+  .tl-wrap{padding:6px 0 4px;flex:0 0 auto}
+  .zoomrow{padding:4px 12px 0}
+  .zoomrow label{display:none}
+  .zoomrow input{max-width:none;height:22px}
+  .tools{flex:0 0 auto;gap:4px;overflow:visible}
+  .tool{flex:1 1 0;min-width:0;padding:7px 2px 6px;font-size:10px;letter-spacing:.03em;gap:2px}
+  .tool svg{width:19px;height:19px}
+  .insp{display:none;flex:0 0 auto;max-height:40%;overflow:auto;padding:12px;gap:12px;border-radius:12px}
+  body.has-sel .insp{display:flex}
+  body.has-sel .tools{display:none}
+  body.has-sel .hint{display:none}
+  body.has-sel .stage{min-height:110px}
+  body.has-sel .zoomrow{display:none}
+  .only-m{display:inline-flex}
+  .insp h2 .only-m{margin-left:auto}
+  .sheet{max-height:88%}
+}
 /* export sheet */
 .scrim{position:fixed;inset:0;background:rgba(3,5,8,.72);z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:0 max(0px,env(safe-area-inset-right,0px)) 0 max(0px,env(safe-area-inset-left,0px))}
 @media (min-width:640px){.scrim{align-items:center}}
@@ -146,7 +191,6 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
 <div id="app">
   <header class="top">
     <div class="brand"><i aria-hidden="true"></i>Moviola <span class="save" id="saveState" aria-live="polite"></span></div>
-    <div class="seg" id="fmt" role="group" aria-label="Formato"></div>
     <button class="btn" id="btnProjects">Progetti</button>
     <button class="btn primary" id="btnExport">Esporta</button>
   </header>
@@ -166,16 +210,6 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
         <button class="round" id="btnUndo" aria-label="Annulla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
       </div>
 
-      <div class="tools">
-        <button class="tool" id="tMedia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Media</button>
-        <button class="tool" id="tSplit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>Dividi</button>
-        <button class="tool" id="tText"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>Testo</button>
-        <button class="tool" id="tCard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h10"/></svg>Cartello</button>
-        <button class="tool" id="tMusic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Musica</button>
-        <button class="tool" id="tLogo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/></svg>Logo</button>
-        <button class="tool" id="tDel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Elimina</button>
-      </div>
-
       <div class="tl-wrap">
         <div class="tl-scroll" id="tlScroll">
           <div class="tl-inner" id="tlInner">
@@ -187,6 +221,15 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
           </div>
         </div>
         <div class="zoomrow"><label for="zoom">Zoom timeline</label><input type="range" id="zoom" min="12" max="240" value="56"></div>
+      </div>
+      <div class="tools">
+        <button class="tool" id="tMedia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Media</button>
+        <button class="tool" id="tSplit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>Dividi</button>
+        <button class="tool" id="tText"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>Testo</button>
+        <button class="tool" id="tCard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h10"/></svg>Cartello</button>
+        <button class="tool" id="tMusic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Musica</button>
+        <button class="tool" id="tLogo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/></svg>Logo</button>
+        <button class="tool" id="tDel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Elimina</button>
       </div>
     </div>
 
@@ -723,11 +766,25 @@ function renderTimeline(){
   }
   if (!P.clips.length) v = `<div class="lane-empty" style="left:${X0}px">Nessuna clip: tocca + Media</div>`;
   $('#trV').innerHTML = v;
-  // texts
+  // texts: righe separate quando si sovrappongono
+  const mob = window.matchMedia('(max-width:959px)').matches;
+  const VH = mob ? 46 : 56, RH = 24, GAP = 4;
+  const rows = [], rowOf = new Map();
+  [...P.texts].sort((a,b) => a.start - b.start).forEach(x => {
+    let r = rows.findIndex(end => end <= x.start + 0.001);
+    if (r < 0){ r = rows.length; rows.push(0); }
+    rows[r] = x.end; rowOf.set(x.id, r);
+  });
+  const nRows = Math.max(1, rows.length);
+  const topV = 28, topT = topV + VH + 6, topA = topT + nRows*(RH+GAP) + 2;
+  $('#trV').style.cssText = `top:${topV}px;height:${VH}px`;
+  $('#trT').style.cssText = `top:${topT}px;height:${nRows*(RH+GAP)}px`;
+  $('#trA').style.cssText = `top:${topA}px;height:22px`;
+  inner.style.height = (topA + 26) + 'px';
   let tx = '';
   for (const x of P.texts){
     const isSel = sel && sel.type === 'text' && sel.id === x.id;
-    tx += `<div class="bar text${isSel?' sel':''}" data-text="${x.id}" style="left:${xOf(x.start)}px;width:${Math.max(6,(x.end-x.start)*pps-2)}px">${esc(x.text.split('\n')[0])}<div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
+    tx += `<div class="bar text${isSel?' sel':''}" data-text="${x.id}" style="top:${rowOf.get(x.id)*(RH+GAP)}px;bottom:auto;height:${RH}px;left:${xOf(x.start)}px;width:${Math.max(6,(x.end-x.start)*pps-2)}px">${esc(x.text.split('\n')[0])}<div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
   if (!P.texts.length) tx = `<div class="lane-empty" style="left:${X0}px">Testi</div>`;
   $('#trT').innerHTML = tx;
@@ -851,6 +908,7 @@ function renderInspector(){
   if (!o){
     const tot = total();
     h = `<h2>Progetto <small>${FORMATS[P.format][0]}×${FORMATS[P.format][1]}</small></h2>
+      <div class="grp"><div class="lab">Formato</div>${fmtSeg()}</div>
       <div class="grp"><label class="lab" for="pname">Nome</label><input class="tin" id="pname" value="${esc(P.name || '')}" placeholder="Es. Highlights 1ª giornata" autocomplete="off"></div>
       <div class="stats"><div class="stat"><b>${P.clips.length}</b><span>clip</span></div><div class="stat"><b>${P.texts.length}</b><span>testi</span></div><div class="stat"><b>${fmtT(tot).replace(/\.\d+$/,'')}</b><span>durata</span></div></div>
       <p class="note">Tocca una clip o un testo nella timeline per modificarlo. Trascina le maniglie gialle per tagliare, oppure porta la linea rossa dove vuoi e usa <b>Dividi</b>.</p>
@@ -908,6 +966,9 @@ function renderInspector(){
       <div class="row"><button class="btn" data-act="lrep">Cambia immagine</button><button class="btn danger" data-act="ldel">Rimuovi logo</button></div>`;
   }
   insp.innerHTML = h;
+  document.body.classList.toggle('has-sel', !!o);
+  const h2 = insp.querySelector('h2');
+  if (o && h2) h2.insertAdjacentHTML('beforeend', '<button type="button" class="btn only-m" data-act="done">Fatto</button>');
 }
 function syncInspector(){
   const o = findSel(); if (!o || !sel) return;
@@ -951,6 +1012,8 @@ function markSw(id, v){ document.querySelectorAll(`[data-sw="${id}"] button`).fo
 insp.addEventListener('click', e => {
   const o = findSel();
   const segB = e.target.closest('[data-seg] button');
+  if (segB && segB.parentElement.dataset.seg === 'pfmt'){ setFormat(segB.dataset.v); return; }
+  if (e.target.closest('[data-act="done"]')){ select(null); return; }
   if (segB && o){
     const key = segB.parentElement.dataset.seg, v = segB.dataset.v;
     const num = ['fin','fout','mfo'].includes(key);
@@ -1062,13 +1125,12 @@ $('#btnStart').onclick = () => { pause(); setT(0); scroller.scrollLeft = 0; };
 $('#btnUndo').onclick = undo;
 $('#btnUndo').disabled = true;
 
-function renderFormats(){
-  $('#fmt').innerHTML = Object.entries(FORMATS).map(([k,v]) => `<button type="button" data-f="${k}" aria-pressed="${k===P.format}" title="${v[2]}">${k}</button>`).join('');
+const fmtSeg = () => seg('pfmt', Object.entries(FORMATS).map(([k,v]) => [k, `${k} <small style="opacity:.6">${v[2]}</small>`]), P.format);
+function setFormat(f){
+  if (!FORMATS[f] || f === P.format) return;
+  snapshot(); P.format = f; sizePreview(); renderInspector();
+  document.querySelectorAll('[data-seg="pfmt"] button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === f));
 }
-$('#fmt').addEventListener('click', e => {
-  const b = e.target.closest('[data-f]'); if (!b || b.dataset.f === P.format) return;
-  snapshot(); P.format = b.dataset.f; renderFormats(); sizePreview(); renderInspector();
-});
 
 document.addEventListener('keydown', e => {
   if (e.target.matches('input,textarea,select') || !$('#scrim').hidden) return;
@@ -1082,7 +1144,6 @@ document.addEventListener('keydown', e => {
 
 function refresh(rebuild){
   $('#hint').hidden = !P.example;
-  renderFormats();
   sizePreview();
   renderTimeline();
   if (rebuild) renderInspector();
@@ -1334,6 +1395,8 @@ async function openProjects(){
   try { const est = await navigator.storage.estimate(); if (est && est.usage != null) usage = `Spazio usato sul dispositivo: ${(est.usage/1048576).toFixed(0)} MB`; } catch(e){}
   scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pjT">
     <h3 id="pjT">Progetti</h3>
+    <div class="grp"><label class="lab" for="pjName">Progetto aperto</label><input class="tin" id="pjName" value="${esc(P.name || '')}" placeholder="Es. Highlights 1ª giornata" autocomplete="off"></div>
+    <div class="grp"><div class="lab">Formato</div>${fmtSeg()}</div>
     ${dbOK ? '' : '<p class="err">Il salvataggio non è disponibile in questo browser (forse una finestra privata).</p>'}
     <div class="row"><button class="btn primary" id="pjNew">Nuovo progetto</button></div>
     <div class="plist">${list.map(r => `<div class="pitem${r.id === projectId ? ' cur' : ''}">
@@ -1344,7 +1407,9 @@ async function openProjects(){
     <div class="row"><button class="btn" id="pjClose">Chiudi</button></div>
   </div>`;
   scrim.hidden = false;
-  $('#pjClose').onclick = () => { delArmed = null; closeExport(); };
+  $('#pjClose').onclick = () => { delArmed = null; closeExport(); renderInspector(); };
+  $('#pjName').oninput = e => { P.name = e.target.value; scheduleSave(); };
+  scrim.querySelector('[data-seg="pfmt"]').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFormat(b.dataset.v); });
   $('#pjNew').onclick = async () => {
     delArmed = null; closeExport();
     clearMedia(); projectId = uid(); P = exampleProject(); P.name = 'Nuovo progetto'; P.example = true;
@@ -1378,7 +1443,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 /* ---------- boot ---------- */
 window.addEventListener('resize', () => renderTimeline());
-renderFormats(); sizePreview(); renderTimeline(); renderInspector(); updateTime();
+sizePreview(); renderTimeline(); renderInspector(); updateTime();
 T = 1.6; updateTime(); draw();
 (async () => {
   try {
@@ -1396,3 +1461,6 @@ if (document.fonts) {
 }
 })();
 </script>
+
+</body>
+</html>
