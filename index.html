@@ -209,6 +209,9 @@ body.theater .markbar{bottom:16px}
 .chk{display:flex;gap:10px;align-items:center;font-weight:500;cursor:pointer}
 .chk input{width:20px;height:20px;accent-color:var(--accent)}
 select.tin{appearance:auto}
+.upd{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top,0px));z-index:95;display:flex;align-items:center;gap:8px;background:var(--fg);color:var(--bg);border-radius:12px;padding:6px 6px 6px 14px;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:calc(100% - 24px);white-space:nowrap}
+.upd .btn{min-height:34px;padding:4px 12px}
+.upd .btn:not(.primary){background:transparent;border-color:transparent;color:var(--bg)}
 /* export sheet */
 .scrim{position:fixed;inset:0;background:rgba(3,5,8,.72);z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:0 max(0px,env(safe-area-inset-right,0px)) 0 max(0px,env(safe-area-inset-left,0px))}
 @media (min-width:640px){.scrim{align-items:center}}
@@ -297,6 +300,7 @@ select.tin{appearance:auto}
 <input type="file" id="fileLogo" accept="image/*" hidden>
 <div class="scrim" id="scrim" hidden></div>
 <div class="toast" id="toast" hidden></div>
+<div class="upd" id="upd" hidden role="status"><span>Nuova versione disponibile</span><button class="btn primary" id="updGo">Aggiorna</button><button class="btn" id="updNo" aria-label="Più tardi">✕</button></div>
 
 <script>
 (() => {
@@ -1701,10 +1705,13 @@ async function openProjects(){
       <div class="pinfo" data-open="${r.id}"><b>${esc(r.name || 'Senza titolo')}</b><span>${fmtDate(r.updated)} · ${fmtT(r.duration || 0).replace(/\.\d+$/,'')}${r.id === projectId ? ' · aperto' : ''}</span></div>
       <button class="btn danger" data-del="${r.id}">${delArmed === r.id ? 'Conferma' : 'Elimina'}</button></div>`).join('') || '<p class="note">Nessun progetto salvato.</p>'}</div>
     <p class="note">I progetti e i video restano salvati in questo browser, su questo dispositivo. ${usage}</p>
+    <div class="row"><button class="btn" id="pjUpd">Controlla aggiornamenti</button></div>
+    <p class="note">Versione ${APP_BUILD.replace('T',' ')}</p>
     <div class="row"><button class="btn" id="pjClose">Chiudi</button></div>
   </div>`;
   scrim.hidden = false;
   $('#pjClose').onclick = () => { delArmed = null; closeExport(); renderInspector(); };
+  $('#pjUpd').onclick = () => { closeExport(); checkUpdate(true); };
   $('#pjName').oninput = e => { P.name = e.target.value; scheduleSave(); };
   scrim.querySelector('[data-seg="pfmt"]').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFormat(b.dataset.v); });
   $('#pjNew').onclick = async () => {
@@ -1737,6 +1744,36 @@ async function openProjects(){
 $('#btnProjects').onclick = openProjects;
 
 scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) closeExport(); });
+
+
+/* ---------- aggiornamenti dell'app ---------- */
+const APP_BUILD = '2026-10-30T09:03:47';
+const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
+const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
+let lastUpdCheck = 0, updDismissed = null;
+async function checkUpdate(manual){
+  if (!onPages()){ if (manual) toast('Gli aggiornamenti si controllano dall’app su GitHub Pages'); return; }
+  lastUpdCheck = Date.now();
+  try {
+    const r = await fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const m = (await r.text()).match(BUILD_RE);
+    if (!m){ if (manual) toast('Non riesco a leggere la versione online'); return; }
+    if (m[1] !== APP_BUILD){ if (manual || updDismissed !== m[1]){ $('#upd').hidden = false; $('#upd').dataset.v = m[1]; } }
+    else if (manual) toast('Hai già l’ultima versione');
+  } catch(e){ if (manual) toast('Controllo non riuscito: sei connesso a internet?'); }
+}
+async function applyUpdate(){
+  $('#upd').querySelector('span').textContent = 'Aggiorno…';
+  try { await saveNow(); } catch(e){}
+  // scarica la versione nuova e sostituisce quella che il telefono teneva in memoria
+  try { await fetch(location.pathname, { cache:'reload' }); } catch(e){}
+  location.replace(location.pathname + '?v=' + Date.now());
+}
+$('#updGo').onclick = applyUpdate;
+$('#updNo').onclick = () => { updDismissed = $('#upd').dataset.v; $('#upd').hidden = true; };
+document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - lastUpdCheck > 60000) checkUpdate(false); });
+setTimeout(() => checkUpdate(false), 1500);
 
 /* ---------- boot ---------- */
 window.addEventListener('resize', () => renderTimeline());
