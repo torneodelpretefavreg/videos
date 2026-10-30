@@ -68,7 +68,9 @@ button{font:inherit;color:inherit;touch-action:manipulation}
 .hint{position:absolute;left:10px;right:10px;bottom:10px;margin:auto;max-width:360px;background:rgba(14,18,24,.88);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--muted);text-align:center;backdrop-filter:blur(6px)}
 .hint b{color:var(--fg)}
 
-.transport{display:flex;align-items:center;justify-content:center;gap:8px}
+.transport{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap}
+.seekrow{flex:0 0 100%;display:flex;padding:0 4px}
+#seek{width:100%;height:30px;margin:0;accent-color:var(--rec);touch-action:none}
 .ov{position:absolute;top:8px;z-index:3;display:flex;gap:6px}
 .ov.tl{left:8px}.ov.tr{right:8px}
 .chip{background:rgba(10,12,16,.72);border:1px solid rgba(255,255,255,.14);color:#fff;border-radius:8px;min-height:32px;min-width:36px;padding:4px 9px;font-family:var(--f-cond);font-weight:700;font-size:15px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px)}
@@ -76,11 +78,11 @@ button{font:inherit;color:inherit;touch-action:manipulation}
 .chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .tc{cursor:default;font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:.02em}
 .tc span{color:rgba(255,255,255,.55);margin-left:.3em}
-body.theater .toast{bottom:calc(92px + env(safe-area-inset-bottom,0px));z-index:90}
+body.theater .toast{bottom:calc(128px + env(safe-area-inset-bottom,0px));z-index:90}
 .round.sm{width:38px;height:38px}.round.sm svg{width:18px;height:18px}
 #cv{cursor:pointer}
 body.theater{overflow:hidden}
-body.theater .stage{position:fixed;left:0;right:0;top:0;height:calc(100% - 76px - env(safe-area-inset-bottom,0px));z-index:60;border:0;border-radius:0;min-height:0;padding:0;background:#000}
+body.theater .stage{position:fixed;left:0;right:0;top:0;height:calc(100% - 112px - env(safe-area-inset-bottom,0px));z-index:60;border:0;border-radius:0;min-height:0;padding:0;background:#000}
 body.theater #cv{max-height:calc(100% - 16px);max-width:calc(100% - 16px)}
 body.theater .ov{top:calc(10px + env(safe-area-inset-top,0px))}
 body.theater .ov.tl{left:max(10px,env(safe-area-inset-left,0px))}body.theater .ov.tr{right:max(10px,env(safe-area-inset-right,0px))}
@@ -157,6 +159,7 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
 }
 
 
+@media (max-width:440px){.save{display:none}}
 /* ---- telefono: schermo unico, come un'app ---- */
 .only-m{display:none}
 @media (max-width:959px){
@@ -173,7 +176,9 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
   .transport{gap:5px}
   .round{width:38px;height:38px}.round.big{width:48px;height:48px}.round svg{width:18px;height:18px}
   .round.sm{width:36px;height:36px}
-  .top{gap:8px}
+  .top{gap:8px;flex-wrap:nowrap}
+  .brand{min-width:0}
+  .top .btn.primary{padding:6px 10px}
   .tl-wrap{padding:6px 0 4px;flex:0 0 auto}
   .zoomrow{padding:4px 12px 0}
   .zoomrow label{display:none}
@@ -229,6 +234,7 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
       </section>
 
       <div class="transport">
+        <div class="seekrow"><input type="range" id="seek" min="0" max="1000" step="0.1" value="0" aria-label="Posizione nel video"></div>
         <button class="round" id="btnStart" aria-label="Vai all'inizio"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5 5h2.2v14H5zM19 5v14L8.5 12z"/></svg></button>
         <button class="round" id="btnBack5" aria-label="Indietro 5 secondi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><text x="12" y="15.5" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="Barlow,sans-serif">5</text></svg></button>
         <button class="round" id="btnPrevF" aria-label="Fotogramma precedente"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h2v14H7zM18 5v14l-8-7z"/></svg></button>
@@ -248,7 +254,7 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
             <div class="playhead" id="ph"></div>
           </div>
         </div>
-        <div class="zoomrow"><label for="zoom">Zoom timeline</label><input type="range" id="zoom" min="12" max="240" value="56"></div>
+        <div class="zoomrow"><label for="zoom">Zoom timeline</label><input type="range" id="zoom" min="0" max="100" step="0.1" value="60"></div>
       </div>
       <div class="tools">
         <button class="tool" id="tMedia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Media</button>
@@ -767,11 +773,16 @@ function syncMedia(force){
     }
   }
 }
-function seekPreview(){
+function seekPreview(fast){
   const o = clipAt(T);
   if (o && o.c.kind === 'video'){
     const m = media.get(o.c.mediaId);
-    if (m){ const tgt = clamp(o.c.in + (T - o.start), 0, m.duration - 0.001); if (Math.abs(m.el.currentTime - tgt) > 0.015) m.el.currentTime = tgt; }
+    if (m){
+      const tgt = clamp(o.c.in + (T - o.start), 0, m.duration - 0.001);
+      if (Math.abs(m.el.currentTime - tgt) > 0.015){
+        if (fast === true && typeof m.el.fastSeek === 'function') m.el.fastSeek(tgt); else m.el.currentTime = tgt;
+      }
+    }
   }
   requestDraw();
 }
@@ -783,7 +794,12 @@ function setPlayIcon(){
 const fmtT = s => { s = Math.max(0, s); const m = Math.floor(s/60), r = s - m*60; return `${m}:${r.toFixed(2).padStart(5,'0')}`; };
 const fmtS = s => s.toFixed(1).replace('.', ',') + ' s';
 let lastTc = '';
-function updateTime(){ const h = `${fmtT(T)} <span>/ ${fmtT(total())}</span>`; if (h !== lastTc){ $('#tc').innerHTML = h; lastTc = h; } placePlayhead(); }
+let seeking = false;
+function updateTime(){
+  const h = `${fmtT(T)} <span>/ ${fmtT(total())}</span>`; if (h !== lastTc){ $('#tc').innerHTML = h; lastTc = h; }
+  if (!seeking){ const tot = total(); $('#seek').value = tot ? T/tot*1000 : 0; }
+  placePlayhead();
+}
 
 /* ---------- timeline ---------- */
 const X0 = 14;
@@ -799,11 +815,13 @@ function followPlayhead(){
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function renderTimeline(){
   const tot = total();
+  pps = clamp(pps, ppsMin(), PPS_MAX);
+  const zs = $('#zoom'); if (document.activeElement !== zs) zs.value = sliderFromPps(pps);
   const width = Math.max(scroller.clientWidth, xOf(Math.max(tot, 5)) + 120);
   inner.style.width = width + 'px';
   // ruler
-  const steps = [0.5,1,2,5,10,15,30,60,120];
-  const step = steps.find(s => s*pps >= 54) || 120;
+  const steps = [0.5,1,2,5,10,15,30,60,120,300,600,900,1800];
+  const step = steps.find(s => s*pps >= 54) || 1800;
   let r = '';
   const end = tOf(width);
   for (let t = 0; t <= end; t += step){
@@ -931,10 +949,29 @@ inner.addEventListener('pointerup', endDrag);
 inner.addEventListener('pointercancel', endDrag);
 function scrubTo(e){ const rect = inner.getBoundingClientRect(); setT(tOf(e.clientX - rect.left)); }
 
+// zoom logaritmico: tutto a sinistra = intero progetto visibile, tutto a destra = dettaglio
+const PPS_MAX = 240;
+const ppsMin = () => Math.min(40, Math.max(0.02, (scroller.clientWidth - X0 - 40) / Math.max(total(), 5)));
+const ppsFromSlider = v => ppsMin() * Math.pow(PPS_MAX/ppsMin(), v/100);
+const sliderFromPps = p => clamp(100*Math.log(p/ppsMin())/Math.log(PPS_MAX/ppsMin()), 0, 100);
 $('#zoom').addEventListener('input', e => {
   const center = tOf(scroller.scrollLeft + scroller.clientWidth/2);
-  pps = +e.target.value; renderTimeline();
+  pps = ppsFromSlider(+e.target.value); renderTimeline();
   scroller.scrollLeft = xOf(center) - scroller.clientWidth/2;
+});
+let seekWasPlaying = false;
+const seekEl = $('#seek');
+const startSeek = () => { if (seeking) return; seeking = true; seekWasPlaying = playing; pause(); };
+seekEl.addEventListener('pointerdown', startSeek);
+seekEl.addEventListener('touchstart', startSeek, { passive:true });
+seekEl.addEventListener('input', () => {
+  if (!seeking) startSeek();
+  T = clamp(+seekEl.value/1000*total(), 0, total());
+  seekPreview(true); updateTime(); followPlayhead();
+});
+seekEl.addEventListener('change', () => {
+  seeking = false; seekPreview(false); updateTime();
+  if (seekWasPlaying) play();
 });
 
 /* ---------- inspector ---------- */
