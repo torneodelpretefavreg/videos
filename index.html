@@ -450,10 +450,10 @@ function drawFit(g, src, sw, sh, W, H, c){
     // background: blurred, darkened cover
     const sb = Math.max(W/sw, H/sh) * 1.15;
     g.save();
-    if (filterOK) g.filter = `blur(${Math.round(Math.min(W,H)/28)}px) brightness(0.55)`;
+    if (filterOK && !(playing && g === ctx)) g.filter = `blur(${Math.round(Math.min(W,H)/28)}px) brightness(0.55)`;
     g.drawImage(src, (W-sw*sb)/2, (H-sh*sb)/2, sw*sb, sh*sb);
     g.restore();
-    if (!filterOK){ g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(0,0,W,H); }
+    if (!filterOK || (playing && g === ctx)){ g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(0,0,W,H); }
   }
   let s = (fit === 'cover' ? Math.max(W/sw, H/sh) : Math.min(W/sw, H/sh)) * (c.zoom || 1);
   const dw = sw*s, dh = sh*s;
@@ -691,7 +691,15 @@ function play(){
 function pause(){ if (!playing) return; playing = false; pauseMedia(); setPlayIcon(); seekPreview(); }
 function tick(now){
   if (!playing) return;
-  T = clock.p0 + (now - clock.t0)/1000;
+  // Durante una clip video comanda il video: l'anteprima lo segue, così non serve riposizionarlo (niente scatti)
+  const cur = clipAt(T);
+  const vm = cur && cur.c.kind === 'video' && activeClipId === cur.c.id ? media.get(cur.c.mediaId) : null;
+  if (vm){
+    const el = vm.el, c = cur.c;
+    if (el.ended || el.currentTime >= c.out - 0.02) T = cur.start + cur.len + 0.001;
+    else if (!el.paused && !el.seeking && el.readyState >= 2) T = Math.max(T, cur.start + (el.currentTime - c.in));
+    clock = { t0:now, p0:T };
+  } else T = clock.p0 + (now - clock.t0)/1000;
   if (T >= total()){ T = total(); playing = false; pauseMedia(); setPlayIcon(); }
   else syncMedia(false);
   draw(); updateTime(); followPlayhead();
@@ -709,8 +717,7 @@ function syncMedia(force){
         videoEls().forEach(v => { if (v !== el && !v.paused) v.pause(); });
         activeClipId = c.id; el.currentTime = target; el.play().catch(()=>{});
       } else {
-        if (el.paused) el.play().catch(()=>{});
-        if (Math.abs(el.currentTime - target) > 0.3) el.currentTime = target;
+        if (el.paused && !el.ended) el.play().catch(()=>{});
       }
     }
   } else if (activeClipId !== (o && o.c.id)){
@@ -726,7 +733,7 @@ function syncMedia(force){
         const fo = P.music.fadeOut, end = total();
         const a = fo > 0 && T > end - fo ? clamp((end - T)/fo, 0, 1) : 1;
         try { el.volume = clamp(P.music.volume*a, 0, 1); } catch(e){}
-        if (force || Math.abs(el.currentTime - target) > 0.3) el.currentTime = target;
+        if (force || Math.abs(el.currentTime - target) > 0.5) el.currentTime = target;
         if (el.paused) el.play().catch(()=>{});
       }
     }
@@ -747,7 +754,8 @@ function setPlayIcon(){
 }
 const fmtT = s => { s = Math.max(0, s); const m = Math.floor(s/60), r = s - m*60; return `${m}:${r.toFixed(2).padStart(5,'0')}`; };
 const fmtS = s => s.toFixed(1).replace('.', ',') + ' s';
-function updateTime(){ $('#tc').innerHTML = `${fmtT(T)} <span>/ ${fmtT(total())}</span>`; placePlayhead(); }
+let lastTc = '';
+function updateTime(){ const h = `${fmtT(T)} <span>/ ${fmtT(total())}</span>`; if (h !== lastTc){ $('#tc').innerHTML = h; lastTc = h; } placePlayhead(); }
 
 /* ---------- timeline ---------- */
 const X0 = 14;
