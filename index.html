@@ -1441,9 +1441,9 @@ async function openProjects(){
   scrim.querySelector('[data-seg="pfmt"]').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFormat(b.dataset.v); });
   $('#pjNew').onclick = async () => {
     delArmed = null; closeExport();
-    clearMedia(); projectId = uid(); P = exampleProject(); P.name = 'Nuovo progetto'; P.example = true;
+    clearMedia(); projectId = uid(); P = exampleProject(); P.name = 'Progetto del ' + fmtDate(Date.now()); P.example = true;
     sel = null; T = 1.6; undoStack.length = 0; $('#btnUndo').disabled = true;
-    refresh(true); await saveNow(); toast('Nuovo progetto creato');
+    refresh(true); await saveNow(); toast('Nuovo progetto creato: ora aggiungi i video con + Media');
   };
   scrim.querySelector('.plist').addEventListener('click', async e => {
     const op = e.target.closest('[data-open]'), del = e.target.closest('[data-del]');
