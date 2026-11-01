@@ -158,6 +158,38 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
   .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
   .insp{position:sticky;top:calc(env(safe-area-inset-top,0px) + 8px);max-height:calc(100vh - 24px);overflow:auto}
 }
+/* libreria: pannello laterale fisso su schermi larghi, striscia sopra gli strumenti altrove */
+.libside{display:none}
+.libstrip{display:none}
+body.lib-open .libstrip{display:flex}
+@media (min-width:1200px){
+  #app{max-width:1600px}
+  .layout{grid-template-columns:270px minmax(0,1fr) 330px}
+  .libside{display:flex;flex-direction:column;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 8px);max-height:calc(100vh - 24px);overflow:auto;min-width:0}
+  body.lib-open .libstrip{display:none}
+  #tMedia{display:none}
+}
+.libside h2{margin:0;font-family:var(--f-cond);font-weight:800;font-size:18px;letter-spacing:.03em;text-transform:uppercase}
+.libside .note{font-size:12px}
+.libside .litem{cursor:grab}
+.libside .litem .btn{min-height:30px;padding:2px 8px;font-size:13px}
+.libside .lthumb{width:54px;height:34px}
+.libstrip{gap:6px;overflow-x:auto;touch-action:pan-x;scrollbar-width:none;flex:0 0 auto;padding:2px 0}
+.libstrip::-webkit-scrollbar{display:none}
+.lcard{flex:0 0 auto;width:92px;display:flex;flex-direction:column;gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px;cursor:pointer;position:relative;text-align:left;min-width:0;color:var(--fg);font:inherit}
+.lcard.new{border-color:var(--accent)}
+.lcard .lthumb{width:100%;height:44px}
+.lcard b{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lcard span{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;font-family:var(--f-cond);font-weight:700}
+.lcard.imp{align-items:center;justify-content:center;color:var(--accent);font-family:var(--f-cond);font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:.04em;border-style:dashed}
+.lcard.imp svg{width:22px;height:22px}
+.lcard .used{position:absolute;top:8px;right:8px;width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 2px var(--panel)}
+.ghost{position:fixed;z-index:100;pointer-events:none;transform:translate(-50%,-60%);background:var(--accent);color:var(--accent-ink);font-family:var(--f-cond);font-weight:800;font-size:14px;padding:6px 10px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
+.tl-wrap.drop{box-shadow:0 0 0 2px var(--accent) inset}
+.dropmark{position:absolute;top:0;bottom:0;width:3px;margin-left:-1px;background:var(--accent);z-index:6;pointer-events:none;border-radius:2px}
+.clip.sel{touch-action:none;cursor:grab}
+body.clipdrag .clip.sel{opacity:.9;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:4;cursor:grabbing}
+.tool[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
 
 
 @media (max-width:440px){.save{display:none}}
@@ -190,6 +222,7 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
   .insp{display:none;flex:0 0 auto;max-height:40%;overflow:auto;padding:12px;gap:12px;border-radius:12px}
   body.has-sel .insp{display:flex}
   body.has-sel .tools{display:none}
+  body.has-sel .libstrip{display:none}
   body.has-sel .hint{display:none}
   body.has-sel .stage{min-height:110px}
   .only-m{display:inline-flex}
@@ -254,6 +287,7 @@ select.tin{appearance:auto}
   </header>
 
   <div class="layout">
+    <aside class="libside" id="libSide" aria-label="Libreria"></aside>
     <div class="main">
       <section class="stage">
         <canvas id="cv"></canvas>
@@ -268,7 +302,7 @@ select.tin{appearance:auto}
           <button class="chip go" id="mk10">−10 s</button>
           <button class="chip done" id="mkDone">Fatto · 0</button>
         </div>
-        <div class="hint" id="hint">Progetto di esempio. Tocca <b>Libreria</b> per importare video, foto e musica, oppure trascinali qui.</div>
+        <div class="hint" id="hint">Progetto di esempio. Apri la <b>Libreria</b> per importare video, foto e musica, oppure trascinali qui.</div>
       </section>
 
       <div class="transport">
@@ -290,10 +324,12 @@ select.tin{appearance:auto}
             <div class="track" id="trT"></div>
             <div class="track" id="trA"></div>
             <div class="playhead" id="ph"></div>
+            <div class="dropmark" id="dropmark" hidden></div>
           </div>
         </div>
         <div class="zoomrow"><label for="zoom">Zoom timeline</label><span class="zl" aria-hidden="true">−</span><input type="range" id="zoom" min="0" max="100" step="0.1" value="60"><span class="zl" aria-hidden="true">+</span></div>
       </div>
+      <div class="libstrip" id="libStrip" aria-label="Libreria"></div>
       <div class="tools">
         <button class="tool" id="tMedia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7" stroke-linecap="round"/></svg>Libreria</button>
         <button class="tool" id="tHL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Azioni</button>
@@ -777,7 +813,10 @@ async function importFiles(files){
   if (relinked && !added && !newIds.length && !failed.length){ toast(relinked === 1 ? 'File ricollegato al progetto' : `${relinked} file ricollegati`); return; }
   if (failed.length) toast(`Non riesco a leggere: ${failed.join(', ')}. Prova a convertirlo in MP4 (H.264).`, 5000);
   else $('#toast').hidden = true;
-  if (newIds.length) openLibrary(newIds);
+  if (newIds.length){
+    libNew = new Set(newIds); setLibOpen(true);
+    toast(newIds.length === 1 ? 'Aggiunto alla libreria: trascinalo sulla timeline o toccalo' : `${newIds.length} elementi in libreria`, 3000);
+  }
 }
 
 /* ---------- playback ---------- */
@@ -973,6 +1012,13 @@ inner.addEventListener('pointerdown', e => {
     drag = { kind:'trim', side:h.dataset.h, c, x0:e.clientX, in0:c.in, out0:c.out, dur0:c.dur, snap:false };
     inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
+  if (clipEl && !h && (clipEl.classList.contains('sel') || e.pointerType === 'mouse')){
+    const c = P.clips.find(c => c.id === clipEl.dataset.clip);
+    drag = { kind:'clipmove', c, x0:e.clientX, y0:e.clientY, moving:false };
+    inner.setPointerCapture(e.pointerId);
+    if (clipEl.classList.contains('sel')) e.preventDefault();
+    return;
+  }
   if (textEl && textEl.classList.contains('sel')){
     const x = P.texts.find(t => t.id === textEl.dataset.text);
     drag = { kind:'text', side:h ? h.dataset.h : 'm', x, x0:e.clientX, s0:x.start, e0:x.end, snap:false, moved:false };
@@ -1017,6 +1063,22 @@ inner.addEventListener('pointermove', e => {
     renderTimeline(); seekPreview(); updateTime(); syncInspector();
     return;
   }
+  if (drag.kind === 'clipmove'){
+    if (!drag.moving){
+      if (Math.abs(e.clientX - drag.x0) < 6) return;
+      drag.moving = true; pause(); snapshot();
+      sel = { type:'clip', id:drag.c.id }; document.body.classList.add('clipdrag');
+    }
+    const r = scroller.getBoundingClientRect();
+    if (e.clientX < r.left + 30) scroller.scrollLeft -= 10; else if (e.clientX > r.right - 30) scroller.scrollLeft += 10;
+    const t = tOf(e.clientX - inner.getBoundingClientRect().left);
+    const c = drag.c, others = P.clips.filter(x => x !== c);
+    let acc = 0, idx = 0;
+    for (const o of others){ const L = clipLen(o); if (acc + L/2 < t) idx++; acc += L; }
+    if (P.clips.indexOf(c) !== idx){ others.splice(idx, 0, c); P.clips = others; }
+    renderTimeline();
+    return;
+  }
   if (drag.kind === 'audio'){
     const d = (e.clientX - drag.x0)/pps, a = drag.a, m = media.get(a.mediaId);
     if (!drag.snap && Math.abs(e.clientX - drag.x0) > 3){ snapshot(); drag.snap = true; }
@@ -1043,6 +1105,14 @@ function endDrag(e){
     else if (d.audEl) select({ type:'audio', id:d.audEl.dataset.audio });
     else select(null);
     setT(t);
+  } else if (d.kind === 'clipmove'){
+    document.body.classList.remove('clipdrag');
+    if (d.moving){
+      const o = layout().find(o => o.c === d.c); T = o ? o.start : T;
+      renderTimeline(); renderInspector(); seekPreview(); updateTime(); scheduleSave();
+    } else if (e.type === 'pointerup'){
+      select({ type:'clip', id:d.c.id }); setT(tOf(e.clientX - inner.getBoundingClientRect().left));
+    }
   } else if (d.kind === 'trim' || d.kind === 'text' || d.kind === 'audio'){ renderTimeline(); renderInspector(); if (d.snap) scheduleSave(); }
 }
 inner.addEventListener('pointerup', endDrag);
@@ -1342,13 +1412,14 @@ function insertIndexAt(t){
   if (!o) return P.clips.length;
   return t - o.start < o.len/2 ? P.clips.indexOf(o.c) : P.clips.indexOf(o.c) + 1;
 }
-function addFromLibrary(id){
+function addFromLibrary(id, atT){
+  if (atT != null) T = Math.max(0, atT);
   const m = media.get(id);
   if (!m){ toast('Questo file va ricollegato: importalo di nuovo dalla Libreria', 4000); return; }
   pause(); snapshot(); P.example = false;
   if (m.type === 'audio'){
     const cd = clipsDur();
-    const start = cd && T >= cd - 0.05 ? 0 : Math.max(0, T);
+    const start = atT == null && cd && T >= cd - 0.05 ? 0 : Math.max(0, T);
     const len = cd > start + 0.5 ? Math.min(m.duration, cd - start) : m.duration;
     const a = { id:uid(), mediaId:m.id, name:m.name, start, offset:0, len, volume:0.8, fadeIn:0, fadeOut: cd && Math.abs(start + len - cd) < 0.1 && m.duration > len ? 2 : 0 };
     P.audios.push(a); sel = { type:'audio', id:a.id }; T = start;
@@ -1361,8 +1432,95 @@ function addFromLibrary(id){
     T = layout().find(o => o.c === c).start;
   }
   refresh(true); scheduleSave(); followPlayhead();
+  renderLibrary();
   toast(m.type === 'audio' ? `Audio aggiunto da ${fmtT(T).replace(/\.\d+$/,'')}` : 'Aggiunto alla timeline');
 }
+let libNew = new Set();
+function libItems(){
+  return P.library.map(id => {
+    const m = media.get(id);
+    if (m) return { id, m, type:m.type, name:m.name, dur:m.duration };
+    const p = pendingRelink.find(x => x.id === id);
+    return p ? { id, m:null, type:p.type, name:p.name, dur:0 } : null;
+  }).filter(Boolean);
+}
+const thumbHTML = it => it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${it.m.thumb}')` : ''}"></div>`;
+const durTxt = it => !it.m ? 'da ricollegare' : it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'');
+const ICO_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+function renderLibrary(){
+  const items = libItems();
+  // pannello laterale (schermi larghi)
+  const groups = [['video','Video'],['image','Foto'],['audio','Audio']];
+  const row = it => {
+    const used = usedInTimeline(it.id);
+    return `<div class="litem${libNew.has(it.id) ? ' new' : ''}" data-lib="${it.id}">${thumbHTML(it)}<div class="linfo"><b>${esc(it.name)}</b><span class="${it.m ? '' : 'warn'}">${durTxt(it)}${used ? ' · in uso' : ''}</span></div>
+      <button class="btn primary" data-add="${it.id}" ${it.m ? '' : 'disabled'} aria-label="Aggiungi alla timeline">+</button>
+      <button class="btn x" data-rm="${it.id}" aria-label="Togli dalla libreria" ${used ? 'disabled title="È in timeline"' : ''}>✕</button></div>`;
+  };
+  $('#libSide').innerHTML = `<h2>Libreria</h2>
+    <button class="btn primary" data-imp="1">Importa file</button>
+    <p class="note">Trascina un elemento sulla timeline nel punto che vuoi, oppure tocca + per metterlo sulla linea rossa.</p>
+    <div class="lib">${items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('') : '<p class="note">Vuota. Importa o trascina qui video, foto e canzoni.</p>'}</div>`;
+  // striscia (telefono e schermi medi)
+  $('#libStrip').innerHTML = `<button class="lcard imp" data-imp="1">${ICO_PLUS}Importa</button>` + items.map(it =>
+    `<div class="lcard${libNew.has(it.id) ? ' new' : ''}" data-lib="${it.id}" role="button" tabindex="0" aria-label="${esc(it.name)}">${thumbHTML(it)}<b>${esc(it.name)}</b><span>${durTxt(it)}</span>${usedInTimeline(it.id) ? '<i class="used" aria-hidden="true"></i>' : ''}</div>`).join('');
+  $('#tMedia').setAttribute('aria-pressed', document.body.classList.contains('lib-open'));
+}
+function setLibOpen(on){ document.body.classList.toggle('lib-open', on); renderLibrary(); }
+
+// trascina dalla libreria alla timeline (mouse e dito); tocco semplice = aggiungi sulla linea rossa
+let libDrag = null;
+function libDown(e){
+  if (e.target.closest('[data-imp]')){ $('#fileMedia').click(); return; }
+  const rm = e.target.closest('[data-rm]');
+  if (rm){ if (!rm.disabled){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); renderLibrary(); } return; }
+  const add = e.target.closest('[data-add]');
+  if (add){ if (!add.disabled) addFromLibrary(add.dataset.add); return; }
+  const card = e.target.closest('[data-lib]'); if (!card) return;
+  libDrag = { id:card.dataset.lib, x0:e.clientX, y0:e.clientY, on:false, pid:e.pointerId, src:card, side:!!e.target.closest('#libSide') };
+}
+function libMove(e){
+  if (!libDrag || e.pointerId !== libDrag.pid) return;
+  const dx = e.clientX - libDrag.x0, dy = e.clientY - libDrag.y0;
+  if (!libDrag.on){
+    // nella striscia lo scorrimento orizzontale resta libero: si trascina muovendo verso l'alto
+    const go = libDrag.side ? Math.hypot(dx, dy) > 8 : (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx));
+    if (!go) return;
+    const m = media.get(libDrag.id); if (!m){ libDrag = null; return; }
+    libDrag.on = true; pause();
+    const g = document.createElement('div'); g.className = 'ghost'; g.textContent = (m.type === 'audio' ? '♪ ' : '') + m.name; document.body.appendChild(g); libDrag.ghost = g;
+    try { libDrag.src.setPointerCapture(e.pointerId); } catch(err){}
+  }
+  e.preventDefault();
+  libDrag.ghost.style.left = e.clientX + 'px'; libDrag.ghost.style.top = e.clientY + 'px';
+  const r = scroller.getBoundingClientRect(), over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top - 30 && e.clientY <= r.bottom + 30;
+  $('.tl-wrap').classList.toggle('drop', over);
+  const mk = $('#dropmark');
+  if (over){
+    if (e.clientX < r.left + 30) scroller.scrollLeft -= 12; else if (e.clientX > r.right - 30) scroller.scrollLeft += 12;
+    const t = Math.max(0, tOf(e.clientX - inner.getBoundingClientRect().left));
+    const m = media.get(libDrag.id);
+    let x = xOf(t);
+    if (m.type !== 'audio'){ const L = layout(), idx = insertIndexAt(t); x = xOf(idx < L.length ? L[idx].start : clipsDur()); }
+    mk.style.left = x + 'px'; mk.hidden = false; libDrag.t = t;
+  } else { mk.hidden = true; libDrag.t = null; }
+}
+function libUp(e){
+  if (!libDrag || e.pointerId !== libDrag.pid) return;
+  const d = libDrag; libDrag = null;
+  $('#dropmark').hidden = true; $('.tl-wrap').classList.remove('drop');
+  if (d.ghost) d.ghost.remove();
+  if (!d.on){ if (e.type === 'pointerup') addFromLibrary(d.id); return; }
+  if (d.t != null) addFromLibrary(d.id, d.t);
+}
+['libSide','libStrip'].forEach(id => {
+  const el = $('#' + id);
+  el.addEventListener('pointerdown', libDown);
+  el.addEventListener('pointermove', libMove, { passive:false });
+  el.addEventListener('pointerup', libUp);
+  el.addEventListener('pointercancel', libUp);
+  el.addEventListener('keydown', e => { const c = e.target.closest('[data-lib]'); if (c && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); addFromLibrary(c.dataset.lib); } });
+});
 function openLibrary(highlight){
   pause();
   const hl = new Set(highlight || []);
@@ -1400,7 +1558,7 @@ function openLibrary(highlight){
     else if (rm){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); openLibrary(); }
   });
 }
-$('#tMedia').onclick = () => openLibrary();
+$('#tMedia').onclick = () => setLibOpen(!document.body.classList.contains('lib-open'));
 $('#fileMedia').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
 $('#tLogo').onclick = () => { if (P.logo) select({ type:'logo', id:'logo' }); else $('#fileLogo').click(); };
 $('#fileLogo').onchange = async e => {
@@ -1626,6 +1784,7 @@ document.addEventListener('keydown', e => {
 
 function refresh(rebuild){
   $('#hint').hidden = !P.example;
+  renderLibrary();
   sizePreview();
   renderTimeline();
   if (rebuild) renderInspector();
@@ -1936,7 +2095,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-01T23:02:20';
+const APP_BUILD = '2026-11-01T23:07:46';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
