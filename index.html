@@ -2373,20 +2373,76 @@ async function exportVideo(opt, onProg, signal){
   videoEls().forEach(v => { v.pause(); v.muted = true; });
   exportFrames.clear();
   const t0 = performance.now();
-  for (let i = 0; i < n; i++){
+  let lastProg = 0;
+  const prog = i => {
+    const now = performance.now(); if (now - lastProg < 120 && i < n-1) return; lastProg = now;
+    const el = (now - t0)/1000, r = (i+1)/el, speedX = (i+1)/fps/el;
+    onProg({ phase:`Fotogramma ${i+1} di ${n} · ${speedX.toFixed(1).replace('.', ',')}× tempo reale`, p:(i+1)/n, eta:(n-i-1)/r });
+  };
+  const encodeAt = i => {
+    const fr = new VideoFrame(c, { timestamp:Math.round(i*1e6/fps), duration:Math.round(1e6/fps) });
+    ve.encode(fr, { keyFrame: i % (fps*2) === 0 }); fr.close(); prog(i);
+  };
+  const tAt = i => Math.min(i/fps, dur - 1e-4);
+  const canPlayCapture = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+  const slowClips = new Set();
+  // Percorso veloce: il video scorre e i fotogrammi vengono catturati mentre passano (niente salti per ogni fotogramma)
+  const runPlayback = (o, i0, i1) => new Promise((resolve) => {
+    const cl = o.c, m = media.get(cl.mediaId), el = m.el, sp = spd(cl);
+    const ts = i => cl.in + (tAt(i) - o.start)*sp;
+    let i = i0, done = false, rate = 1, lastMt = null, fdur = 1/30, calls = 0, maxWork = 0, skips = 0, wd = 0;
+    const finish = () => { if (done) return; done = true; clearTimeout(wd); el.pause(); try { el.playbackRate = 1; } catch(e){} resolve(i); };
+    const arm = () => { clearTimeout(wd); wd = setTimeout(finish, 4000); };   // se il video si blocca, si torna al metodo preciso
+    const setRate = () => { try { el.playbackRate = clamp(rate*sp, 0.0625, 8); } catch(e){} };
+    const step = async (now, meta) => {
+      if (done) return;
+      if (signal.aborted || encErr){ finish(); return; }
+      arm();
+      const mt = meta.mediaTime, w0 = performance.now();
+      if (lastMt != null){ const d = mt - lastMt; if (d > 0){ if (d < fdur*0.9) fdur = d; if (d > fdur*1.6) skips++; } }
+      lastMt = mt;
+      while (i < i1 && ts(i) <= mt + fdur*0.5){ render(g, W, H, tAt(i), 'export'); encodeAt(i); i++; }
+      if (i >= i1){ finish(); return; }
+      maxWork = Math.max(maxWork, performance.now() - w0);
+      if (++calls % 24 === 0){
+        // regola la velocità di scorrimento: più veloce se c'è margine, più lenta se salta fotogrammi
+        const budget = 1000*fdur/(rate*sp);
+        if (skips > 0 && rate > 0.5){ rate = Math.max(0.5, rate/1.5); setRate(); }
+        else if (!skips && maxWork < budget*0.35 && rate < 4){ rate = Math.min(4, rate*1.5); setRate(); }
+        skips = 0; maxWork = 0;
+      }
+      if (ve.encodeQueueSize > 16){ el.pause(); while (ve.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 3)); }
+      el.requestVideoFrameCallback(step);
+      if (el.paused) el.play().catch(finish);
+    };
+    seekTo(el, ts(i0)).then(() => {
+      el.muted = true; setRate(); arm();
+      el.requestVideoFrameCallback(step);
+      el.play().catch(finish);
+    });
+  });
+  let i = 0;
+  while (i < n){
     if (signal.aborted){ try { ve.close(); } catch(e){} throw new DOMException('abort','AbortError'); }
     if (encErr) throw encErr;
-    const t = Math.min(i/fps, dur - 1e-4);
+    const t = tAt(i), o = clipAt(t);
+    if (canPlayCapture && o && o.c.kind === 'video' && !slowClips.has(o.c.id) && !transitionAt(t)){
+      let j = i + 1;
+      while (j < n){ const tj = tAt(j), oj = clipAt(tj); if (!oj || oj.c !== o.c || transitionAt(tj)) break; j++; }
+      if (j - i >= 6){
+        const reached = await runPlayback(o, i, j);
+        if (reached < j) slowClips.add(o.c.id);   // questa clip non scorre bene: continua col metodo preciso
+        i = reached;
+        continue;
+      }
+    }
     await prepareFrame(t);
     render(g, W, H, t, 'export');
-    const fr = new VideoFrame(c, { timestamp:Math.round(i*1e6/fps), duration:Math.round(1e6/fps) });
-    ve.encode(fr, { keyFrame: i % (fps*2) === 0 }); fr.close();
+    encodeAt(i);
     while (ve.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 3));
-    if (i % 3 === 0 || i === n-1){
-      const el = (performance.now() - t0)/1000, rate = (i+1)/el;
-      onProg({ phase:`Fotogramma ${i+1} di ${n}`, p:(i+1)/n, eta:(n-i-1)/rate });
-    }
+    i++;
   }
+  if (signal.aborted){ try { ve.close(); } catch(e){} throw new DOMException('abort','AbortError'); }
   await ve.flush(); ve.close();
   if (encErr) throw encErr;
   muxer.finalize();
@@ -2555,7 +2611,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-01T23:31:34';
+const APP_BUILD = '2026-11-01T23:59:31';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
