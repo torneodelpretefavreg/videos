@@ -2228,8 +2228,8 @@ async function getAudioBuffer(mediaId){
   if (m.file.size > AUDIO_LIMIT){ skippedAudio.add(m.name); return null; }
   try {
     const ab = await m.file.arrayBuffer();
-    const oc = new OfflineAudioContext(2, 1, 48000);
-    buf = await new Promise((res, rej) => { const p = oc.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+    try { buf = await new OfflineAudioContext(2, 1, 48000).decodeAudioData(ab.slice(0)); }
+    catch(e){ buf = await new Promise((res, rej) => { const p = new OfflineAudioContext(2, 1, 44100).decodeAudioData(ab, res, rej); if (p && p.catch) p.catch(rej); }); }
   } catch(e){ buf = null; }
   audioCache.set(mediaId, buf);
   return buf;
@@ -2248,13 +2248,17 @@ function segNode(oc, item, t0){
   }
   return g;
 }
-async function renderMix(dur){
-  const sr = 48000, oc = new OfflineAudioContext(2, Math.max(1, Math.ceil(dur*sr)), sr);
-  let any = false;
+let mixInfo = { used:[], failed:[] };
+async function renderMix(dur, sr = 48000){
+  const oc = new OfflineAudioContext(2, Math.max(1, Math.ceil(dur*sr)), sr);
+  let any = false; mixInfo = { used:[], failed:[] };
+  const note = (id, ok) => { const m = media.get(id); const n = m ? m.name : 'audio'; const l = ok ? mixInfo.used : mixInfo.failed; if (!l.includes(n)) l.push(n); };
   for (const o of layout()){
     const c = o.c;
     if (c.kind !== 'video' || !(c.volume > 0) || spd(c) !== 1) continue;
-    const buf = await getAudioBuffer(c.mediaId); if (!buf) continue;
+    const buf = await getAudioBuffer(c.mediaId);
+    if (!buf){ const m = media.get(c.mediaId); if (m && !skippedAudio.has(m.name)) note(c.mediaId, false); continue; }
+    note(c.mediaId, true);
     const src = oc.createBufferSource(); src.buffer = buf;
     const g = oc.createGain(); src.connect(g); g.connect(segNode(oc, c, o.start));
     const v = c.volume, s = o.start, e = o.start + o.len;
@@ -2265,7 +2269,9 @@ async function renderMix(dur){
   }
   for (const a of P.audios){
     const buf = await getAudioBuffer(a.mediaId);
-    if (!buf || a.offset >= buf.duration || a.start >= dur) continue;
+    if (!buf){ note(a.mediaId, false); continue; }
+    if (a.offset >= buf.duration || a.start >= dur) continue;
+    note(a.mediaId, true);
     const L = Math.min(audLen(a), buf.duration - a.offset, dur - a.start); if (L <= 0) continue;
     const src = oc.createBufferSource(); src.buffer = buf;
     const g = oc.createGain(); src.connect(g); g.connect(segNode(oc, a, a.start));
@@ -2304,6 +2310,39 @@ async function prepareFrame(t){
   }
 }
 
+// secondo passaggio in tempo reale (solo se manca il codificatore AAC): video già pronto + mix audio → MediaRecorder MP4
+let exportAC = null;
+async function addAudioRealtime(videoBlob, mix, W, H, fps, bitrate, onProg, signal){
+  if (!window.MediaRecorder || !exportAC) return null;
+  const mime = ['video/mp4;codecs="avc1.640028,mp4a.40.2"','video/mp4;codecs=avc1,mp4a','video/mp4'].find(t => { try { return MediaRecorder.isTypeSupported(t); } catch(e){ return false; } });
+  if (!mime) return null;
+  const v = document.createElement('video'); v.muted = true; v.playsInline = true; v.preload = 'auto';
+  const url = URL.createObjectURL(videoBlob); v.src = url; pool.appendChild(v);
+  try {
+    await new Promise((res, rej) => { v.addEventListener('loadeddata', res, { once:true }); v.addEventListener('error', rej, { once:true }); setTimeout(res, 8000); });
+    const cv2 = document.createElement('canvas'); cv2.width = W; cv2.height = H;
+    const g2 = cv2.getContext('2d'); g2.drawImage(v, 0, 0, W, H);
+    const vs = cv2.captureStream(fps); const vt = vs.getVideoTracks()[0];
+    const ac = exportAC; try { await ac.resume(); } catch(e){}
+    const dest = ac.createMediaStreamDestination(); const src = ac.createBufferSource(); src.buffer = mix; src.connect(dest);
+    const rec = new MediaRecorder(new MediaStream([vt, ...dest.stream.getAudioTracks()]), { mimeType:mime, videoBitsPerSecond:bitrate, audioBitsPerSecond:256000 });
+    const parts = []; rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+    const stopped = new Promise(r => rec.onstop = r);
+    let raf = 0;
+    const paint = () => { g2.drawImage(v, 0, 0, W, H); onProg({ phase:`Inserisco l’audio · ${fmtT(v.currentTime).replace(/\.\d+$/,'')} di ${fmtT(v.duration).replace(/\.\d+$/,'')}`, p:v.currentTime/(v.duration || 1), eta:(v.duration - v.currentTime) }); if (!v.ended && !signal.aborted) raf = v.requestVideoFrameCallback ? v.requestVideoFrameCallback(paint) : requestAnimationFrame(paint); };
+    rec.start(1000);
+    const t0 = ac.currentTime + 0.15;
+    src.start(t0);
+    setTimeout(() => { v.play().catch(() => {}); paint(); }, 150);
+    await new Promise(r => { v.addEventListener('ended', r, { once:true }); signal.addEventListener('abort', r, { once:true }); });
+    await new Promise(r => setTimeout(r, 300));
+    try { src.stop(); } catch(e){}
+    rec.stop(); await stopped;
+    if (signal.aborted) throw new DOMException('abort','AbortError');
+    return parts.length ? new Blob(parts, { type:'video/mp4' }) : null;
+  } catch(e){ if (e && e.name === 'AbortError') throw e; return null; }
+  finally { URL.revokeObjectURL(url); v.removeAttribute('src'); v.remove(); }
+}
 async function exportVideo(opt, onProg, signal){
   if (!('VideoEncoder' in window)) throw new Error('Questo browser non può esportare video. Usa Chrome, Edge o Safari aggiornati.');
   if (!window.Mp4Muxer) throw new Error('Il modulo di esportazione MP4 non si è caricato. Controlla la connessione e ricarica la pagina.');
@@ -2330,39 +2369,44 @@ async function exportVideo(opt, onProg, signal){
   if (!vcfg) throw new Error(`Questo dispositivo non riesce a codificare video a ${W}×${H}. Prova una risoluzione più bassa.`);
 
   onProg({ phase:'Preparo l’audio…', p:0 });
-  let mix = null, acfg = null, acodec = null, audioNote = '';
+  let mix = null, acfg = null, acodec = 'aac', audioNote = '', audioMode = 'none';
   skippedAudio = new Set();
-  try { mix = await renderMix(dur); } catch(e){ mix = null; audioNote = 'Audio non elaborabile: il video è uscito muto.'; }
-  if (skippedAudio.size) audioNote = `L’audio di ${[...skippedAudio].join(', ')} non è incluso: il file è troppo grande per elaborarne l’audio qui. ` + (P.audios.length ? 'La musica invece c’è.' : 'Aggiungi una musica oppure usa un video più corto.');
-  if (signal.aborted) throw new DOMException('abort','AbortError');
-  if (mix){
-    if ('AudioEncoder' in window){
-      for (const [codec, mc] of [['mp4a.40.2','aac'],['opus','opus']]){
-        const cfg = { codec, sampleRate:48000, numberOfChannels:2, bitrate:256000 };
-        try { if ((await AudioEncoder.isConfigSupported(cfg)).supported){ acfg = cfg; acodec = mc; break; } } catch(e){}
-      }
+  // AAC (l'unico che funziona ovunque dentro un MP4): provo più combinazioni, Safari è esigente
+  if ('AudioEncoder' in window){
+    for (const [sr, br] of [[48000,256000],[48000,192000],[44100,256000],[44100,192000],[48000,128000],[44100,128000]]){
+      const cfg = { codec:'mp4a.40.2', sampleRate:sr, numberOfChannels:2, bitrate:br };
+      try { if ((await AudioEncoder.isConfigSupported(cfg)).supported){ acfg = cfg; break; } } catch(e){}
     }
-    if (!acfg) audioNote = 'Questo browser non sa codificare l’audio: il video è uscito muto. Con Chrome l’audio c’è.';
   }
+  const SR = acfg ? acfg.sampleRate : 48000;
+  try { mix = await renderMix(dur, SR); } catch(e){ mix = null; audioNote = 'Errore nel preparare l’audio: il video è uscito muto.'; }
+  const notes = [];
+  if (skippedAudio.size) notes.push(`Audio di ${[...skippedAudio].join(', ')} escluso: file troppo grande da elaborare.`);
+  if (mixInfo.failed.length) notes.push(`Non riesco a leggere l’audio di ${mixInfo.failed.join(', ')}.`);
+  if (signal.aborted) throw new DOMException('abort','AbortError');
+  if (mix) audioMode = acfg ? 'aac' : 'realtime';
 
   const target = new Mp4Muxer.ArrayBufferTarget();
   const mopts = { target, video:{ codec:'avc', width:W, height:H, frameRate:fps }, fastStart:'in-memory', firstTimestampBehavior:'offset' };
-  if (acfg) mopts.audio = { codec:acodec, numberOfChannels:2, sampleRate:48000 };
+  if (audioMode === 'aac') mopts.audio = { codec:'aac', numberOfChannels:2, sampleRate:SR };
   const muxer = new Mp4Muxer.Muxer(mopts);
   let encErr = null;
 
-  if (acfg){
-    const ae = new AudioEncoder({ output:(ch, meta) => muxer.addAudioChunk(ch, meta), error:e => encErr = e });
+  if (audioMode === 'aac'){
+    let aErr = null, chunks = 0;
+    const ae = new AudioEncoder({ output:(ch, meta) => { chunks++; muxer.addAudioChunk(ch, meta); }, error:e => aErr = e });
     ae.configure(acfg);
-    const N = mix.length, L = mix.getChannelData(0), R = mix.numberOfChannels > 1 ? mix.getChannelData(1) : L, step = 4800;
-    for (let o = 0; o < N; o += step){
+    const N = mix.length, L = mix.getChannelData(0), Rr = mix.numberOfChannels > 1 ? mix.getChannelData(1) : L, step = 1024*4;
+    for (let o = 0; o < N && !aErr; o += step){
       const m = Math.min(step, N - o), d = new Float32Array(m*2);
-      d.set(L.subarray(o, o+m), 0); d.set(R.subarray(o, o+m), m);
-      const ad = new AudioData({ format:'f32-planar', sampleRate:48000, numberOfFrames:m, numberOfChannels:2, timestamp:Math.round(o/48000*1e6), data:d });
+      d.set(L.subarray(o, o+m), 0); d.set(Rr.subarray(o, o+m), m);
+      const ad = new AudioData({ format:'f32-planar', sampleRate:SR, numberOfFrames:m, numberOfChannels:2, timestamp:Math.round(o/SR*1e6), data:d });
       ae.encode(ad); ad.close();
+      if (ae.encodeQueueSize > 64) await new Promise(r => setTimeout(r, 1));
     }
-    await ae.flush(); ae.close();
-    if (encErr) throw encErr;
+    try { await ae.flush(); } catch(e){ aErr = aErr || e; }
+    try { ae.close(); } catch(e){}
+    if (aErr || !chunks) throw new Error('La codifica audio non è riuscita su questo browser. Riprova: userò il metodo alternativo. (' + (aErr && aErr.message || 'nessun dato') + ')');
   }
 
   const c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -2401,14 +2445,23 @@ async function exportVideo(opt, onProg, signal){
       const mt = meta.mediaTime, w0 = performance.now();
       if (lastMt != null){ const d = mt - lastMt; if (d > 0){ if (d < fdur*0.9) fdur = d; if (d > fdur*1.6) skips++; } }
       lastMt = mt;
-      while (i < i1 && ts(i) <= mt + fdur*0.5){ render(g, W, H, tAt(i), 'export'); encodeAt(i); i++; }
+      while (i < i1 && ts(i) <= mt + fdur*0.5){
+        if (ts(i) < mt - fdur*0.75){
+          // fotogramma saltato dal browser: lo rifaccio con il metodo preciso, poi riparto più piano
+          el.pause(); await seekTo(el, ts(i)); render(g, W, H, tAt(i), 'export'); encodeAt(i); i++;
+          rate = Math.max(1, rate/2); setRate(); lastMt = null;
+          if (i >= i1){ finish(); return; }
+          el.requestVideoFrameCallback(step); el.play().catch(finish); return;
+        }
+        render(g, W, H, tAt(i), 'export'); encodeAt(i); i++;
+      }
       if (i >= i1){ finish(); return; }
       maxWork = Math.max(maxWork, performance.now() - w0);
       if (++calls % 24 === 0){
         // regola la velocità di scorrimento: più veloce se c'è margine, più lenta se salta fotogrammi
         const budget = 1000*fdur/(rate*sp);
         if (skips > 0 && rate > 0.5){ rate = Math.max(0.5, rate/1.5); setRate(); }
-        else if (!skips && maxWork < budget*0.35 && rate < 4){ rate = Math.min(4, rate*1.5); setRate(); }
+        else if (!skips && maxWork < budget*0.3 && rate < 2){ rate = Math.min(2, rate*1.5); setRate(); }
         skips = 0; maxWork = 0;
       }
       if (ve.encodeQueueSize > 16){ el.pause(); while (ve.encodeQueueSize > 4) await new Promise(r => setTimeout(r, 3)); }
@@ -2416,6 +2469,8 @@ async function exportVideo(opt, onProg, signal){
       if (el.paused) el.play().catch(finish);
     };
     seekTo(el, ts(i0)).then(() => {
+      // il primo fotogramma è quello del salto: lo disegno subito, così l'inizio è esatto
+      render(g, W, H, tAt(i), 'export'); encodeAt(i); i++;
       el.muted = true; setRate(); arm();
       el.requestVideoFrameCallback(step);
       el.play().catch(finish);
@@ -2429,7 +2484,7 @@ async function exportVideo(opt, onProg, signal){
     if (canPlayCapture && o && o.c.kind === 'video' && !slowClips.has(o.c.id) && !transitionAt(t)){
       let j = i + 1;
       while (j < n){ const tj = tAt(j), oj = clipAt(tj); if (!oj || oj.c !== o.c || transitionAt(tj)) break; j++; }
-      if (j - i >= 6){
+      if (j - i >= fps*8){
         const reached = await runPlayback(o, i, j);
         if (reached < j) slowClips.add(o.c.id);   // questa clip non scorre bene: continua col metodo preciso
         i = reached;
@@ -2446,7 +2501,16 @@ async function exportVideo(opt, onProg, signal){
   await ve.flush(); ve.close();
   if (encErr) throw encErr;
   muxer.finalize();
-  return { blob:new Blob([target.buffer], { type:'video/mp4' }), W, H, audioNote };
+  let blob = new Blob([target.buffer], { type:'video/mp4' });
+  if (audioMode === 'realtime'){
+    // il browser non ha un codificatore AAC: rifaccio un passaggio in tempo reale col registratore di sistema, che mette l'audio
+    const out = await addAudioRealtime(blob, mix, W, H, fps, bitrate, onProg, signal);
+    if (out) blob = out; else { audioMode = 'none'; notes.push('Questo browser non riesce a scrivere l’audio nel video. Con Chrome funziona.'); }
+  }
+  const audioInfo = audioMode === 'aac' ? `Audio AAC ${Math.round(acfg.bitrate/1000)} kbps · ${mixInfo.used.length} ${mixInfo.used.length === 1 ? 'sorgente' : 'sorgenti'}`
+    : audioMode === 'realtime' ? `Audio inserito col registratore di sistema · ${mixInfo.used.length} ${mixInfo.used.length === 1 ? 'sorgente' : 'sorgenti'}`
+    : (P.audios.length || P.clips.some(c => c.kind === 'video') ? 'Senza audio' : 'Nessun audio nel progetto');
+  return { blob, W, H, audioNote: [audioNote, ...notes].filter(Boolean).join(' '), audioInfo, audioOk: audioMode !== 'none' };
 }
 
 const scrim = $('#scrim');
@@ -2488,6 +2552,7 @@ function openExport(){
 }
 function closeExport(){ if (abortCtl) abortCtl.abort(); scrim.hidden = true; scrim.innerHTML = ''; }
 async function runExport(){
+  try { if (!exportAC) exportAC = new (window.AudioContext || window.webkitAudioContext)(); exportAC.resume(); } catch(e){}
   const sheet = scrim.querySelector('.sheet');
   sheet.innerHTML = `<h3>Esportazione</h3>
     <div class="prog"><i id="xbar"></i></div>
@@ -2511,6 +2576,7 @@ async function runExport(){
     sheet.innerHTML = `<h3>Video pronto</h3>
       <video src="${lastUrl}" controls playsinline></video>
       <div class="meta"><span>${r.W}×${r.H} · ${exportOpt.fps} fps · ${Math.round(r.blob.size*8/total()/1e6)} Mbps</span><span>${mb} MB</span></div>
+      <p class="${r.audioOk ? 'note' : 'err'}">${esc(r.audioInfo)}</p>
       ${r.audioNote ? `<p class="err">${esc(r.audioNote)}</p>` : ''}
       <div class="row"><button class="btn" id="xClose">Chiudi</button><button class="btn primary" id="xSave">Salva video</button></div>`;
     $('#xClose').onclick = closeExport;
@@ -2611,7 +2677,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-01T23:59:31';
+const APP_BUILD = '2026-11-02T00:18:48';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
