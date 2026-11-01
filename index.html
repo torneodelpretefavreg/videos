@@ -2221,6 +2221,167 @@ function toast(msg, ms = 2200){
 const audioCache = new Map();
 const AUDIO_LIMIT = 400*1048576;   // oltre questa dimensione decodificare tutto l'audio farebbe esaurire la memoria
 let skippedAudio = new Set();
+/* ---------- estrattore audio MP4/MOV (per Safari, che non legge l'audio dei video con decodeAudioData) ---------- */
+const MP4A = {
+  str(dv, p){ return String.fromCharCode(dv.getUint8(p), dv.getUint8(p+1), dv.getUint8(p+2), dv.getUint8(p+3)); },
+  *boxes(dv, start, end){
+    let p = start;
+    while (p + 8 <= end){
+      let sz = dv.getUint32(p), h = 8; const t = MP4A.str(dv, p+4);
+      if (sz === 1){ sz = Number(dv.getBigUint64(p+8)); h = 16; } else if (sz === 0) sz = end - p;
+      if (sz < h) break;
+      yield { t, s:p+h, e:Math.min(end, p+sz) };
+      p += sz;
+    }
+  },
+  child(dv, b, type){ for (const c of MP4A.boxes(dv, b.s, b.e)) if (c.t === type) return c; return null; },
+  path(dv, b, ...types){ let cur = b; for (const t of types){ cur = cur && MP4A.child(dv, cur, t); } return cur; },
+  // legge l'indice della traccia audio: campioni, posizioni nel file, tempi
+  async index(file){
+    let pos = 0, moov = null;
+    while (pos + 8 <= file.size){
+      const hv = new DataView(await file.slice(pos, pos + 16).arrayBuffer());
+      let sz = hv.getUint32(0), h = 8; const t = MP4A.str(hv, 4);
+      if (sz === 1){ sz = Number(hv.getBigUint64(8)); h = 16; } else if (sz === 0) sz = file.size - pos;
+      if (sz < 8) break;
+      if (t === 'moov'){ moov = new DataView(await file.slice(pos, pos + sz).arrayBuffer()); break; }
+      pos += sz;
+    }
+    if (!moov) throw new Error('moov');
+    const root = { s:8, e:moov.byteLength };
+    for (const trak of MP4A.boxes(moov, root.s, root.e)){
+      if (trak.t !== 'trak') continue;
+      const mdia = MP4A.child(moov, trak, 'mdia'); if (!mdia) continue;
+      const hdlr = MP4A.child(moov, mdia, 'hdlr');
+      if (!hdlr || MP4A.str(moov, hdlr.s + 8) !== 'soun') continue;
+      const mdhd = MP4A.child(moov, mdia, 'mdhd');
+      const ver = moov.getUint8(mdhd.s);
+      const timescale = ver === 1 ? moov.getUint32(mdhd.s + 20) : moov.getUint32(mdhd.s + 12);
+      const stbl = MP4A.path(moov, mdia, 'minf', 'stbl');
+      const stsd = MP4A.child(moov, stbl, 'stsd');
+      const ent = stsd.s + 8, entType = MP4A.str(moov, ent + 4), entEnd = ent + moov.getUint32(ent);
+      const sver = moov.getUint16(ent + 16);
+      let channels = moov.getUint16(ent + 24), rate = moov.getUint32(ent + 32) >>> 16;
+      let kids = ent + 36 + (sver === 1 ? 16 : sver === 2 ? 36 : 0);
+      if (sver === 2){ rate = Math.round(moov.getFloat64(ent + 40)); channels = moov.getUint32(ent + 48); }
+      let codec = null, description;
+      if (entType === 'mp4a'){
+        let esds = null;
+        for (const b of MP4A.boxes(moov, kids, entEnd)){ if (b.t === 'esds') esds = b; if (b.t === 'wave'){ for (const w of MP4A.boxes(moov, b.s, b.e)) if (w.t === 'esds') esds = w; } }
+        if (!esds) throw new Error('esds');
+        let p = esds.s + 4;
+        const len = () => { let n = 0, k = 0, c; do { c = moov.getUint8(p++); n = (n << 7) | (c & 0x7f); } while ((c & 0x80) && ++k < 4); return n; };
+        let asc = null, oti = 0x40;
+        while (p < esds.e){
+          const tag = moov.getUint8(p++), l = len(), end = p + l;
+          if (tag === 0x03){ p += 2; const f = moov.getUint8(p++); if (f & 0x80) p += 2; if (f & 0x40) p += moov.getUint8(p) + 1; if (f & 0x20) p += 2; continue; }
+          if (tag === 0x04){ oti = moov.getUint8(p); p += 13; continue; }
+          if (tag === 0x05){ asc = new Uint8Array(moov.buffer, moov.byteOffset + p, l).slice(); p = end; break; }
+          p = end;
+        }
+        if (oti === 0x6b || oti === 0x69) codec = 'mp3';
+        else if (asc){ let aot = asc[0] >> 3; if (aot === 31) aot = 32 + (((asc[0] & 7) << 3) | (asc[1] >> 5)); codec = 'mp4a.40.' + aot; description = asc; }
+        else codec = 'mp4a.40.2';
+      } else if (entType === 'Opus'){ codec = 'opus'; }
+      else if (entType === '.mp3' || entType === 'mp3 '){ codec = 'mp3'; }
+      else throw new Error('codec ' + entType);
+      // tabelle dei campioni
+      const stsz = MP4A.child(moov, stbl, 'stsz'), stz2 = stsz ? null : MP4A.child(moov, stbl, 'stz2');
+      const sizes = [];
+      if (stsz){ const fixed = moov.getUint32(stsz.s + 4), n = moov.getUint32(stsz.s + 8); for (let i = 0; i < n; i++) sizes.push(fixed || moov.getUint32(stsz.s + 12 + i*4)); }
+      else if (stz2){ const fs = moov.getUint8(stz2.s + 7), n = moov.getUint32(stz2.s + 8); for (let i = 0; i < n; i++){ const q = stz2.s + 12; sizes.push(fs === 16 ? moov.getUint16(q + i*2) : fs === 8 ? moov.getUint8(q + i) : ((moov.getUint8(q + (i >> 1)) >> (i & 1 ? 0 : 4)) & 15)); } }
+      const stsc = MP4A.child(moov, stbl, 'stsc'), sc = [];
+      for (let i = 0, n = moov.getUint32(stsc.s + 4); i < n; i++){ const q = stsc.s + 8 + i*12; sc.push([moov.getUint32(q), moov.getUint32(q + 4)]); }
+      const stco = MP4A.child(moov, stbl, 'stco'), co64 = MP4A.child(moov, stbl, 'co64'), chunks = [];
+      if (stco) for (let i = 0, n = moov.getUint32(stco.s + 4); i < n; i++) chunks.push(moov.getUint32(stco.s + 8 + i*4));
+      else for (let i = 0, n = moov.getUint32(co64.s + 4); i < n; i++) chunks.push(Number(moov.getBigUint64(co64.s + 8 + i*8)));
+      const stts = MP4A.child(moov, stbl, 'stts'), times = [];
+      { let t = 0; for (let i = 0, n = moov.getUint32(stts.s + 4); i < n; i++){ const q = stts.s + 8 + i*8, c = moov.getUint32(q), d = moov.getUint32(q + 4); for (let k = 0; k < c; k++){ times.push(t); t += d; } } times.push(t); }
+      const offs = new Array(sizes.length);
+      let si = 0;
+      for (let ci = 0; ci < chunks.length && si < sizes.length; ci++){
+        let e = 0; while (e + 1 < sc.length && sc[e+1][0] <= ci + 1) e++;
+        let o = chunks[ci];
+        for (let k = 0; k < sc[e][1] && si < sizes.length; k++){ offs[si] = o; o += sizes[si]; si++; }
+      }
+      return { codec, description, rate, channels, timescale, sizes, offs, times, count:si };
+    }
+    return null;   // nessuna traccia audio
+  },
+  // decodifica solo il tratto [t0, t1] (secondi): restituisce { buf, base } con base = istante del primo campione
+  async decodeRange(file, idx, t0, t1){
+    if (!('AudioDecoder' in window)) throw new Error('AudioDecoder');
+    const ts = idx.timescale;
+    let a = 0, b = idx.count;
+    while (a < idx.count && idx.times[a+1]/ts < t0) a++;
+    a = Math.max(0, a - 2);
+    b = a; while (b < idx.count && idx.times[b]/ts < t1) b++;
+    b = Math.min(idx.count, b + 2);
+    if (b <= a) return null;
+    const cfg = { codec:idx.codec, sampleRate:idx.rate, numberOfChannels:idx.channels };
+    if (idx.description) cfg.description = idx.description;
+    const sup = await AudioDecoder.isConfigSupported(cfg);
+    if (!sup.supported) throw new Error('decoder ' + idx.codec);
+    const outs = []; let err = null;
+    const dec = new AudioDecoder({ output:ad => outs.push(ad), error:e => err = e });
+    dec.configure(cfg);
+    // legge i dati a blocchi contigui
+    let i = a;
+    while (i < b && !err){
+      let j = i + 1;
+      while (j < b && idx.offs[j] === idx.offs[j-1] + idx.sizes[j-1] && idx.offs[j] + idx.sizes[j] - idx.offs[i] < 8*1048576) j++;
+      const base = idx.offs[i], end = idx.offs[j-1] + idx.sizes[j-1];
+      const data = new Uint8Array(await file.slice(base, end).arrayBuffer());
+      for (let k = i; k < j; k++){
+        const o = idx.offs[k] - base;
+        dec.decode(new EncodedAudioChunk({ type:'key', timestamp:Math.round(idx.times[k]/ts*1e6), duration:Math.round((idx.times[k+1]-idx.times[k])/ts*1e6), data:data.subarray(o, o + idx.sizes[k]) }));
+      }
+      if (dec.decodeQueueSize > 200) await new Promise(r => setTimeout(r, 2));
+      i = j;
+    }
+    await dec.flush(); dec.close();
+    if (err) throw err;
+    if (!outs.length){ return null; }
+    const sr = outs[0].sampleRate, ch = Math.min(2, outs[0].numberOfChannels), base = outs[0].timestamp/1e6;
+    const last = outs[outs.length-1], len = Math.ceil((last.timestamp/1e6 - base)*sr) + last.numberOfFrames;
+    const buf = new AudioBuffer({ length:Math.max(1, len), numberOfChannels:2, sampleRate:sr });
+    for (const ad of outs){
+      const at = Math.round((ad.timestamp/1e6 - base)*sr), n = Math.min(ad.numberOfFrames, len - at);
+      if (n > 0) for (let c = 0; c < 2; c++){
+        const tmp = new Float32Array(ad.numberOfFrames);
+        ad.copyTo(tmp, { planeIndex:Math.min(c, ch - 1), format:'f32-planar' });
+        buf.getChannelData(c).set(n < tmp.length ? tmp.subarray(0, n) : tmp, at);
+      }
+      ad.close();
+    }
+    return { buf, base };
+  }
+};
+
+const mp4Idx = new Map(), clipAudioCache = new Map();
+async function mp4IndexFor(m){
+  if (!mp4Idx.has(m.id)) mp4Idx.set(m.id, MP4A.index(m.file).catch(e => ({ error:e })));
+  return mp4Idx.get(m.id);
+}
+// audio di una clip video: solo il tratto usato, letto dal file MP4/MOV; se non si può, decodifica classica
+async function getClipAudio(c){
+  const m = media.get(c.mediaId); if (!m) return { fail:true };
+  const key = `${c.mediaId}@${c.in.toFixed(3)}-${c.out.toFixed(3)}`;
+  if (clipAudioCache.has(key)) return clipAudioCache.get(key);
+  let res = null;
+  const idx = await mp4IndexFor(m);
+  if (idx === null) res = { silent:true };
+  else if (idx && !idx.error){
+    try { const d = await MP4A.decodeRange(m.file, idx, Math.max(0, c.in - 0.2), c.out + 0.2); res = d ? { buf:d.buf, base:d.base } : { silent:true }; }
+    catch(e){ res = null; }
+  }
+  if (!res){
+    const buf = await getAudioBuffer(c.mediaId);
+    res = buf ? { buf, base:0 } : { fail:true };
+  }
+  clipAudioCache.set(key, res);
+  return res;
+}
 async function getAudioBuffer(mediaId){
   if (audioCache.has(mediaId)) return audioCache.get(mediaId);
   const m = media.get(mediaId); let buf = null;
@@ -2231,6 +2392,9 @@ async function getAudioBuffer(mediaId){
     try { buf = await new OfflineAudioContext(2, 1, 48000).decodeAudioData(ab.slice(0)); }
     catch(e){ buf = await new Promise((res, rej) => { const p = new OfflineAudioContext(2, 1, 44100).decodeAudioData(ab, res, rej); if (p && p.catch) p.catch(rej); }); }
   } catch(e){ buf = null; }
+  if (!buf && m.type === 'audio'){
+    try { const idx = await MP4A.index(m.file); if (idx){ const d = await MP4A.decodeRange(m.file, idx, 0, 1e9); if (d) buf = d.buf; } } catch(e){}
+  }
   audioCache.set(mediaId, buf);
   return buf;
 }
@@ -2248,16 +2412,18 @@ function segNode(oc, item, t0){
   }
   return g;
 }
-let mixInfo = { used:[], failed:[] };
+let mixInfo = { used:[], failed:[], silent:[] };
 async function renderMix(dur, sr = 48000){
   const oc = new OfflineAudioContext(2, Math.max(1, Math.ceil(dur*sr)), sr);
-  let any = false; mixInfo = { used:[], failed:[] };
+  let any = false; mixInfo = { used:[], failed:[], silent:[] };
   const note = (id, ok) => { const m = media.get(id); const n = m ? m.name : 'audio'; const l = ok ? mixInfo.used : mixInfo.failed; if (!l.includes(n)) l.push(n); };
   for (const o of layout()){
     const c = o.c;
     if (c.kind !== 'video' || !(c.volume > 0) || spd(c) !== 1) continue;
-    const buf = await getAudioBuffer(c.mediaId);
-    if (!buf){ const m = media.get(c.mediaId); if (m && !skippedAudio.has(m.name)) note(c.mediaId, false); continue; }
+    const ca = await getClipAudio(c);
+    if (ca.silent){ const m = media.get(c.mediaId); if (m && !mixInfo.silent.includes(m.name)) mixInfo.silent.push(m.name); continue; }
+    if (ca.fail){ const m = media.get(c.mediaId); if (m && !skippedAudio.has(m.name)) note(c.mediaId, false); continue; }
+    const buf = ca.buf, base = ca.base;
     note(c.mediaId, true);
     const src = oc.createBufferSource(); src.buffer = buf;
     const g = oc.createGain(); src.connect(g); g.connect(segNode(oc, c, o.start));
@@ -2265,7 +2431,8 @@ async function renderMix(dur, sr = 48000){
     g.gain.setValueAtTime(c.fadeIn > 0 ? 0 : v, s);
     if (c.fadeIn > 0) g.gain.linearRampToValueAtTime(v, s + Math.min(c.fadeIn, o.len/2));
     if (c.fadeOut > 0){ g.gain.setValueAtTime(v, Math.max(s + Math.min(c.fadeIn, o.len/2), e - c.fadeOut)); g.gain.linearRampToValueAtTime(0, e); }
-    if (c.in < buf.duration){ src.start(s, c.in, Math.min(o.len, buf.duration - c.in)); any = true; }
+    const off = Math.max(0, c.in - base);
+    if (off < buf.duration){ src.start(s + Math.max(0, base - c.in), off, Math.min(o.len, buf.duration - off)); any = true; }
   }
   for (const a of P.audios){
     const buf = await getAudioBuffer(a.mediaId);
@@ -2507,9 +2674,10 @@ async function exportVideo(opt, onProg, signal){
     const out = await addAudioRealtime(blob, mix, W, H, fps, bitrate, onProg, signal);
     if (out) blob = out; else { audioMode = 'none'; notes.push('Questo browser non riesce a scrivere l’audio nel video. Con Chrome funziona.'); }
   }
-  const audioInfo = audioMode === 'aac' ? `Audio AAC ${Math.round(acfg.bitrate/1000)} kbps · ${mixInfo.used.length} ${mixInfo.used.length === 1 ? 'sorgente' : 'sorgenti'}`
+  const silentTxt = mixInfo.silent.length ? ` · ${mixInfo.silent.join(', ')} ${mixInfo.silent.length === 1 ? 'non ha' : 'non hanno'} audio proprio` : '';
+  const audioInfo = (audioMode === 'aac' ? `Audio AAC ${Math.round(acfg.bitrate/1000)} kbps · ${mixInfo.used.length} ${mixInfo.used.length === 1 ? 'sorgente' : 'sorgenti'}`
     : audioMode === 'realtime' ? `Audio inserito col registratore di sistema · ${mixInfo.used.length} ${mixInfo.used.length === 1 ? 'sorgente' : 'sorgenti'}`
-    : (P.audios.length || P.clips.some(c => c.kind === 'video') ? 'Senza audio' : 'Nessun audio nel progetto');
+    : (P.audios.length || P.clips.some(c => c.kind === 'video') ? 'Senza audio' : 'Nessun audio nel progetto')) + silentTxt;
   return { blob, W, H, audioNote: [audioNote, ...notes].filter(Boolean).join(' '), audioInfo, audioOk: audioMode !== 'none' };
 }
 
@@ -2677,7 +2845,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T00:18:48';
+const APP_BUILD = '2026-11-02T00:30:36';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
