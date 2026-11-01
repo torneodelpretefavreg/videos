@@ -123,7 +123,7 @@ body.theater .transport{position:fixed;left:0;right:0;bottom:0;z-index:61;backgr
 .sel>.h{display:block}
 .bar{position:absolute;top:0;bottom:0;box-sizing:border-box;border-radius:5px;border:2px solid transparent;cursor:pointer;font-family:var(--f-cond);font-weight:700;font-size:12px;padding:0 8px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar.text{background:var(--text-bar);color:#1b1503}
-.bar.text.sel{touch-action:none}
+.bar.text.sel,.bar.audio.sel{touch-action:none}
 .bar.audio{background:color-mix(in srgb,var(--audio) 70%,#000);color:#e6fffb;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.18) 0 2px,transparent 2px 5px);background-size:100% 40%;background-repeat:no-repeat;background-position:bottom}
 .bar .h{width:12px}.bar .h::before{left:5px}
 .playhead{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--rec);pointer-events:none;z-index:5}
@@ -212,6 +212,18 @@ select.tin{appearance:auto}
 .upd{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top,0px));z-index:95;display:flex;align-items:center;gap:8px;background:var(--fg);color:var(--bg);border-radius:12px;padding:6px 6px 6px 14px;font-weight:700;box-shadow:0 8px 30px rgba(0,0,0,.5);max-width:calc(100% - 24px);white-space:nowrap}
 .upd .btn{min-height:34px;padding:4px 12px}
 .upd .btn:not(.primary){background:transparent;border-color:transparent;color:var(--bg)}
+.lib{display:flex;flex-direction:column;gap:6px}
+.libh{font-family:var(--f-cond);font-weight:700;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.litem{display:flex;gap:10px;align-items:center;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px;min-width:0}
+.litem.new{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.lthumb{width:64px;height:40px;border-radius:6px;background:var(--raise) center/cover no-repeat;flex:0 0 auto;display:grid;place-items:center;color:var(--audio)}
+.lthumb svg{width:22px;height:22px}
+.linfo{flex:1;min-width:0}
+.linfo b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.linfo span{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.linfo span.warn{color:#ffb4ad}
+.litem .btn{min-height:34px;padding:4px 10px;flex:0 0 auto}
+.litem .btn.x{width:34px;padding:0;color:var(--muted)}
 .dropzone{position:fixed;inset:0;z-index:99;background:rgba(10,12,16,.82);display:flex;align-items:center;justify-content:center;padding:24px;pointer-events:none}
 .dropzone div{border:3px dashed var(--accent);border-radius:20px;padding:40px 28px;text-align:center;display:flex;flex-direction:column;gap:8px;max-width:520px;width:100%}
 .dropzone b{font-family:var(--f-disp);font-weight:400;font-size:34px;letter-spacing:.03em;text-transform:uppercase;color:var(--accent)}
@@ -256,7 +268,7 @@ select.tin{appearance:auto}
           <button class="chip go" id="mk10">−10 s</button>
           <button class="chip done" id="mkDone">Fatto · 0</button>
         </div>
-        <div class="hint" id="hint">Progetto di esempio. <b>Tocca + Media</b> per caricare i tuoi video, foto o la musica.</div>
+        <div class="hint" id="hint">Progetto di esempio. Tocca <b>Libreria</b> per importare video, foto e musica, oppure trascinali qui.</div>
       </section>
 
       <div class="transport">
@@ -283,12 +295,11 @@ select.tin{appearance:auto}
         <div class="zoomrow"><label for="zoom">Zoom timeline</label><span class="zl" aria-hidden="true">−</span><input type="range" id="zoom" min="0" max="100" step="0.1" value="60"><span class="zl" aria-hidden="true">+</span></div>
       </div>
       <div class="tools">
-        <button class="tool" id="tMedia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Media</button>
+        <button class="tool" id="tMedia"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7" stroke-linecap="round"/></svg>Libreria</button>
         <button class="tool" id="tHL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Azioni</button>
         <button class="tool" id="tSplit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12"/></svg>Dividi</button>
         <button class="tool" id="tText"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg>Testo</button>
         <button class="tool" id="tCard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 12h10"/></svg>Cartello</button>
-        <button class="tool" id="tMusic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>Musica</button>
         <button class="tool" id="tLogo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6z"/></svg>Logo</button>
         <button class="tool" id="tDel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Elimina</button>
       </div>
@@ -300,11 +311,10 @@ select.tin{appearance:auto}
 
 <div id="pool" aria-hidden="true"></div>
 <input type="file" id="fileMedia" accept="video/*,image/*,audio/*" multiple hidden>
-<input type="file" id="fileMusic" accept="audio/*,video/*" hidden>
 <input type="file" id="fileLogo" accept="image/*" hidden>
 <div class="scrim" id="scrim" hidden></div>
 <div class="toast" id="toast" hidden></div>
-<div class="dropzone" id="dropzone" hidden><div><b>Rilascia qui</b><span>Video e foto vanno in timeline, l’audio diventa la musica</span></div></div>
+<div class="dropzone" id="dropzone" hidden><div><b>Rilascia qui</b><span>Video, foto e audio finiscono nella libreria del progetto</span></div></div>
 <div class="upd" id="upd" hidden role="status"><span>Nuova versione disponibile</span><button class="btn primary" id="updGo">Aggiorna</button><button class="btn" id="updNo" aria-label="Più tardi">✕</button></div>
 
 <script>
@@ -327,10 +337,25 @@ const exampleProject = () => ({
     { id:uid(), text:'FUTSAL FABBRICO', style:'title', size:120, y:0.44, color:'#ffffff', bg:'#e63946', anim:'pop', start:0.2, end:3 },
     { id:uid(), text:'Highlights', style:'label', size:64, y:0.56, color:'#111111', bg:'#f5c542', anim:'slide', start:0.6, end:3 }
   ],
-  music:null, logo:null
+  audios:[], library:[], logo:null
 });
 let P = exampleProject();
-let sel = null;        // {type:'clip'|'text'|'music'|'logo', id}
+let sel = null;        // {type:'clip'|'text'|'audio'|'logo', id}
+// porta i progetti vecchi (una sola "music") al nuovo formato con libreria e più brani audio
+function normalize(p){
+  if (!p.audios) p.audios = [];
+  if (!p.texts) p.texts = [];
+  if (p.music){
+    p.audios.push({ id:uid(), mediaId:p.music.mediaId, name:p.music.name, start:0, offset:p.music.offset || 0, len:36000, volume:p.music.volume ?? 0.8, fadeIn:0, fadeOut:p.music.fadeOut ?? 2 });
+    delete p.music;
+  }
+  if (!p.library){
+    p.library = [];
+    const add = id => { if (id && !p.library.includes(id)) p.library.push(id); };
+    p.clips.forEach(c => add(c.mediaId)); p.audios.forEach(a => add(a.mediaId));
+  }
+  return p;
+}
 let T = 0, playing = false, pps = 56;
 const undoStack = [];
 function snapshot(){ undoStack.push(JSON.stringify(P)); if (undoStack.length > 80) undoStack.shift(); $('#btnUndo').disabled = false; scheduleSave(); }
@@ -388,6 +413,8 @@ function usedMediaIds(p){
   const s = new Set();
   p.clips.forEach(c => c.mediaId && s.add(c.mediaId));
   if (p.music) s.add(p.music.mediaId);
+  (p.audios || []).forEach(a => s.add(a.mediaId));
+  (p.library || []).forEach(id => s.add(id));
   if (p.logo) s.add(p.logo.mediaId);
   return s;
 }
@@ -422,7 +449,7 @@ function clearMedia(){
 async function loadProject(rec){
   playing = false; setPlayIcon();
   clearMedia();
-  projectId = rec.id; P = rec.P; sel = null; T = 0;
+  projectId = rec.id; P = normalize(rec.P); sel = null; T = 0;
   undoStack.length = 0; $('#btnUndo').disabled = true;
   refresh(true);
   const ids = [...usedMediaIds(P)];
@@ -468,7 +495,7 @@ async function gcFiles(){
 }
 function undo(){
   if (!undoStack.length) return;
-  P = JSON.parse(undoStack.pop());
+  P = normalize(JSON.parse(undoStack.pop()));
   $('#btnUndo').disabled = !undoStack.length;
   if (sel && !findSel()) sel = null;
   T = Math.min(T, total());
@@ -479,13 +506,14 @@ function undo(){
 const clipLen = c => c.kind === 'video' ? Math.max(0.05, c.out - c.in) : c.dur;
 function layout(){ let s = 0; return P.clips.map(c => { const o = { c, start:s, len:clipLen(c) }; s += o.len; return o; }); }
 function clipsDur(){ return P.clips.reduce((a,c) => a + clipLen(c), 0); }
-function musicSpan(){
-  if (!P.music) return 0;
-  const m = media.get(P.music.mediaId);
-  return m ? Math.max(0, m.duration - P.music.offset) : 0;
+// lunghezza reale di un brano in timeline (non oltre la fine del file)
+function audLen(a){
+  const m = media.get(a.mediaId);
+  return m ? Math.max(0.1, Math.min(a.len, m.duration - a.offset)) : Math.min(a.len, 600);
 }
-// Durata: comandano le clip; senza clip vale la canzone; i testi possono allungarla
-function total(){ return Math.max(clipsDur() || musicSpan(), P.texts.reduce((a,x) => Math.max(a, x.end), 0)); }
+function audiosEnd(){ return P.audios.reduce((e,a) => Math.max(e, a.start + audLen(a)), 0); }
+// Durata: comandano le clip; senza clip valgono i brani audio; i testi possono allungarla
+function total(){ return Math.max(clipsDur() || audiosEnd(), P.texts.reduce((a,x) => Math.max(a, x.end), 0)); }
 function clipAt(t){
   const L = layout();
   for (const o of L) if (t >= o.start && t < o.start + o.len) return o;
@@ -496,7 +524,7 @@ function findSel(){
   if (!sel) return null;
   if (sel.type === 'clip') return P.clips.find(c => c.id === sel.id);
   if (sel.type === 'text') return P.texts.find(c => c.id === sel.id);
-  if (sel.type === 'music') return P.music;
+  if (sel.type === 'audio') return P.audios.find(a => a.id === sel.id);
   if (sel.type === 'logo') return P.logo;
 }
 
@@ -721,7 +749,7 @@ const isImage = f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|gif)
 async function importFiles(files){
   if (!files.length) return;
   pause();
-  let added = 0, failed = [], relinked = 0;
+  let added = 0, failed = [], relinked = 0; const newIds = [];
   toast('Caricamento in corso…', 0);
   for (const f of files){
     if (f.size > 300*1048576) toast(`Apro ${f.name} (${(f.size/1073741824).toFixed(1).replace('.',',')} GB)…`, 0);
@@ -733,17 +761,23 @@ async function importFiles(files){
         media.set(m.id, m); pendingRelink = pendingRelink.filter(p => p !== pm); relinked++;
         continue;
       }
-      if (isAudio(f)){ const m = await loadAudio(f); media.set(m.id, m); storeFile(m); snapshot(); P.music = { mediaId:m.id, name:m.name, offset:0, volume:0.8, fadeOut:2 }; sel = { type:'music', id:'music' }; added++; }
-      else if (isImage(f)){ const m = await loadImage(f); media.set(m.id, m); storeFile(m); snapshot(); const c = { id:uid(), kind:'image', mediaId:m.id, name:m.name, dur:3, fit:'cover', zoom:1, panX:0, panY:0, fadeIn:0, fadeOut:0 }; P.clips.push(c); sel = { type:'clip', id:c.id }; added++; }
-      else { const m = await loadVideo(f); media.set(m.id, m); await makeThumb(m); storeFile(m); snapshot(); const c = { id:uid(), kind:'video', mediaId:m.id, name:m.name, in:0, out:m.duration, fit:'cover', zoom:1, panX:0, panY:0, volume:1, fadeIn:0, fadeOut:0 }; P.clips.push(c); sel = { type:'clip', id:c.id }; added++; }
+      // stesso file già in libreria: non lo duplico
+      const dup = P.library.map(id => media.get(id)).find(m => m && m.name === f.name && m.file && m.file.size === f.size);
+      if (dup){ newIds.push(dup.id); continue; }
+      let m;
+      if (isAudio(f)) m = await loadAudio(f);
+      else if (isImage(f)) m = await loadImage(f);
+      else { m = await loadVideo(f); await makeThumb(m); }
+      media.set(m.id, m); storeFile(m);
+      if (!added) snapshot();
+      P.library.push(m.id); newIds.push(m.id); added++;
     } catch(e){ failed.push(f.name); }
   }
-  if (added) P.example = false;
-  if (added && window.matchMedia('(max-width:959px)').matches && sel && sel.type === 'clip') sel = null;
-  refresh(true);
-  if (relinked && !added && !failed.length){ toast(relinked === 1 ? 'File ricollegato al progetto' : `${relinked} file ricollegati`); return; }
+  refresh(false); scheduleSave();
+  if (relinked && !added && !newIds.length && !failed.length){ toast(relinked === 1 ? 'File ricollegato al progetto' : `${relinked} file ricollegati`); return; }
   if (failed.length) toast(`Non riesco a leggere: ${failed.join(', ')}. Prova a convertirlo in MP4 (H.264).`, 5000);
-  else toast(added === 1 ? 'Aggiunto alla timeline' : `${added} elementi aggiunti`);
+  else $('#toast').hidden = true;
+  if (newIds.length) openLibrary(newIds);
 }
 
 /* ---------- playback ---------- */
@@ -752,7 +786,7 @@ function applyRate(){
   for (const m of media.values()) if (m.type === 'video' || m.type === 'audio'){ try { m.el.playbackRate = rate; } catch(e){} }
 }
 function videoEls(){ return [...media.values()].filter(m => m.type === 'video').map(m => m.el); }
-function pauseMedia(){ videoEls().forEach(v => { if (!v.paused) v.pause(); }); if (P.music){ const m = media.get(P.music.mediaId); if (m && !m.el.paused) m.el.pause(); } activeClipId = null; }
+function pauseMedia(){ for (const m of media.values()) if ((m.type === 'video' || m.type === 'audio') && !m.el.paused) m.el.pause(); activeClipId = null; }
 function play(){
   if (!total()) return;
   if (T >= total() - 0.02) T = 0;
@@ -796,20 +830,22 @@ function syncMedia(force){
     videoEls().forEach(v => { if (!v.paused) v.pause(); });
     activeClipId = o ? o.c.id : null;
   }
-  if (P.music){
-    const m = media.get(P.music.mediaId);
-    if (m){
-      const target = P.music.offset + T, el = m.el;
-      if (target >= m.duration){ if (!el.paused) el.pause(); }
-      else {
-        const fo = P.music.fadeOut, end = total();
-        const a = fo > 0 && T > end - fo ? clamp((end - T)/fo, 0, 1) : 1;
-        try { el.volume = clamp(P.music.volume*a, 0, 1); } catch(e){}
-        if (force || Math.abs(el.currentTime - target) > 0.5) el.currentTime = target;
-        if (el.paused){ try { el.playbackRate = rate; } catch(e){} el.play().catch(()=>{}); }
-      }
-    }
+  // traccia audio: ogni brano suona solo nel suo tratto
+  const live = new Set(), tot = total();
+  for (const a of P.audios){
+    const m = media.get(a.mediaId); if (!m || m.type !== 'audio') continue;
+    const L = audLen(a), endT = Math.min(a.start + L, tot);
+    if (T < a.start || T >= endT || live.has(m.el)) continue;
+    const el = m.el, lt = T - a.start, target = a.offset + lt;
+    let g = 1;
+    if (a.fadeIn > 0 && lt < a.fadeIn) g = lt/a.fadeIn;
+    if (a.fadeOut > 0 && T > endT - a.fadeOut) g = Math.min(g, (endT - T)/a.fadeOut);
+    try { el.volume = clamp(a.volume*g, 0, 1); } catch(e){}
+    if (force || Math.abs(el.currentTime - target) > 0.5) el.currentTime = target;
+    if (el.paused){ try { el.playbackRate = rate; } catch(e){} el.play().catch(()=>{}); }
+    live.add(el);
   }
+  for (const m of media.values()) if (m.type === 'audio' && !live.has(m.el) && !m.el.paused) m.el.pause();
 }
 function seekPreview(fast){
   const o = clipAt(T);
@@ -855,7 +891,7 @@ function renderTimeline(){
   const tot = total();
   pps = clamp(pps, ppsMin(), PPS_MAX);
   const zs = $('#zoom'); if (document.activeElement !== zs) zs.value = sliderFromPps(pps);
-  const width = Math.max(scroller.clientWidth, xOf(Math.max(tot, 5)) + 120);
+  const width = Math.max(scroller.clientWidth, xOf(Math.max(tot, audiosEnd(), 5)) + 120);
   inner.style.width = width + 'px';
   // ruler
   const steps = [0.5,1,2,5,10,15,30,60,120,300,600,900,1800];
@@ -879,7 +915,7 @@ function renderTimeline(){
       <div class="lbl">${esc(name)}</div>${o.len*pps > 54 ? `<div class="dur">${fmtS(o.len)}</div>` : ''}${fx && o.len*pps > 80 ? `<div class="fx">${fx}</div>` : ''}
       <div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
-  if (!P.clips.length) v = `<div class="lane-empty" style="left:${X0}px">Nessuna clip: tocca + Media</div>`;
+  if (!P.clips.length) v = `<div class="lane-empty" style="left:${X0}px">Nessuna clip: apri la Libreria</div>`;
   $('#trV').innerHTML = v;
   // texts: righe separate quando si sovrappongono
   const mob = window.matchMedia('(max-width:959px)').matches;
@@ -891,11 +927,18 @@ function renderTimeline(){
     rows[r] = x.end; rowOf.set(x.id, r);
   });
   const nRows = Math.max(1, rows.length);
+  const arows = [], arowOf = new Map();
+  [...P.audios].sort((a,b) => a.start - b.start).forEach(a => {
+    let r = arows.findIndex(end => end <= a.start + 0.001);
+    if (r < 0){ r = arows.length; arows.push(0); }
+    arows[r] = a.start + audLen(a); arowOf.set(a.id, r);
+  });
+  const nA = Math.max(1, arows.length), AH = 22;
   const topV = 28, topT = topV + VH + 6, topA = topT + nRows*(RH+GAP) + 2;
   $('#trV').style.cssText = `top:${topV}px;height:${VH}px`;
   $('#trT').style.cssText = `top:${topT}px;height:${nRows*(RH+GAP)}px`;
-  $('#trA').style.cssText = `top:${topA}px;height:22px`;
-  inner.style.height = (topA + 26) + 'px';
+  $('#trA').style.cssText = `top:${topA}px;height:${nA*(AH+GAP)}px`;
+  inner.style.height = (topA + nA*(AH+GAP) + 4) + 'px';
   let tx = '';
   for (const x of P.texts){
     const isSel = sel && sel.type === 'text' && sel.id === x.id;
@@ -905,12 +948,11 @@ function renderTimeline(){
   $('#trT').innerHTML = tx;
   // audio
   let a = '';
-  if (P.music){
-    const m = media.get(P.music.mediaId);
-    const len = m ? Math.min(Math.max(tot, 0.5), m.duration - P.music.offset) : tot;
-    const isSel = sel && sel.type === 'music';
-    a = `<div class="bar audio${isSel?' sel':''}" data-music="1" style="left:${xOf(0)}px;width:${Math.max(6,len*pps-2)}px">♪ ${esc(P.music.name || 'Musica')}</div>`;
-  } else a = `<div class="lane-empty" style="left:${X0}px">Musica</div>`;
+  for (const au of P.audios){
+    const isSel = sel && sel.type === 'audio' && sel.id === au.id;
+    a += `<div class="bar audio${isSel?' sel':''}" data-audio="${au.id}" style="top:${arowOf.get(au.id)*(AH+GAP)}px;bottom:auto;height:${AH}px;left:${xOf(au.start)}px;width:${Math.max(6,audLen(au)*pps-2)}px">♪ ${esc(au.name || 'Audio')}<div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
+  }
+  if (!P.audios.length) a = `<div class="lane-empty" style="left:${X0}px">Audio</div>`;
   $('#trA').innerHTML = a;
   placePlayhead();
 }
@@ -919,7 +961,7 @@ function renderTimeline(){
 let drag = null;
 inner.addEventListener('pointerdown', e => {
   const h = e.target.closest('.h');
-  const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]'), musicEl = e.target.closest('[data-music]');
+  const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]'), audEl = e.target.closest('[data-audio]');
   const onRuler = e.target.closest('#ruler');
   if (onRuler){
     pause(); drag = { kind:'scrub' }; inner.setPointerCapture(e.pointerId);
@@ -936,7 +978,13 @@ inner.addEventListener('pointerdown', e => {
     drag = { kind:'text', side:h ? h.dataset.h : 'm', x, x0:e.clientX, s0:x.start, e0:x.end, snap:false, moved:false };
     inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
-  drag = { kind:'tap', x0:e.clientX, y0:e.clientY, clipEl, textEl, musicEl, clientX:e.clientX };
+  if (audEl && audEl.classList.contains('sel')){
+    const a = P.audios.find(x => x.id === audEl.dataset.audio);
+    pause();
+    drag = { kind:'audio', side:h ? h.dataset.h : 'm', a, x0:e.clientX, s0:a.start, o0:a.offset, l0:audLen(a), snap:false };
+    inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
+  }
+  drag = { kind:'tap', x0:e.clientX, y0:e.clientY, clipEl, textEl, audEl, clientX:e.clientX };
 });
 inner.addEventListener('pointermove', e => {
   if (!drag) return;
@@ -961,12 +1009,26 @@ inner.addEventListener('pointermove', e => {
     const d = (e.clientX - drag.x0)/pps, x = drag.x;
     if (!drag.snap && Math.abs(e.clientX - drag.x0) > 3){ snapshot(); drag.snap = true; }
     if (!drag.snap) return;
-    const lim = Math.max(clipsDur() || musicSpan(), drag.e0) + 30;
+    const lim = Math.max(clipsDur() || audiosEnd(), drag.e0) + 30;
     if (drag.side === 'm'){ const len = drag.e0 - drag.s0; x.start = clamp(drag.s0 + d, 0, Math.max(0, lim - len)); x.end = x.start + len; }
     else if (drag.side === 'l') x.start = clamp(drag.s0 + d, 0, x.end - 0.3);
     else x.end = clamp(drag.e0 + d, x.start + 0.3, lim);
     T = clamp(drag.side === 'r' ? x.end - 0.05 : x.start + 0.45, 0, total());
     renderTimeline(); seekPreview(); updateTime(); syncInspector();
+    return;
+  }
+  if (drag.kind === 'audio'){
+    const d = (e.clientX - drag.x0)/pps, a = drag.a, m = media.get(a.mediaId);
+    if (!drag.snap && Math.abs(e.clientX - drag.x0) > 3){ snapshot(); drag.snap = true; }
+    if (!drag.snap) return;
+    const fileDur = m ? m.duration : drag.o0 + drag.l0;
+    if (drag.side === 'm'){ a.start = Math.max(0, drag.s0 + d); a.len = drag.l0; T = a.start; }
+    else if (drag.side === 'l'){
+      const dd = clamp(d, -Math.min(drag.s0, drag.o0), drag.l0 - 0.3);
+      a.start = drag.s0 + dd; a.offset = drag.o0 + dd; a.len = drag.l0 - dd; T = a.start;
+    } else { a.len = clamp(drag.l0 + d, 0.3, fileDur - a.offset); T = a.start + a.len - 0.05; }
+    T = clamp(T, 0, total());
+    renderTimeline(); updateTime(); syncInspector();
     return;
   }
 });
@@ -978,10 +1040,10 @@ function endDrag(e){
     const t = tOf(e.clientX - rect.left);
     if (d.clipEl) select({ type:'clip', id:d.clipEl.dataset.clip });
     else if (d.textEl) select({ type:'text', id:d.textEl.dataset.text });
-    else if (d.musicEl) select({ type:'music', id:'music' });
+    else if (d.audEl) select({ type:'audio', id:d.audEl.dataset.audio });
     else select(null);
     setT(t);
-  } else if (d.kind === 'trim' || d.kind === 'text'){ renderTimeline(); renderInspector(); if (d.snap) scheduleSave(); }
+  } else if (d.kind === 'trim' || d.kind === 'text' || d.kind === 'audio'){ renderTimeline(); renderInspector(); if (d.snap) scheduleSave(); }
 }
 inner.addEventListener('pointerup', endDrag);
 inner.addEventListener('pointercancel', endDrag);
@@ -1102,14 +1164,18 @@ function renderInspector(){
       <div class="grp"><div class="lab">Tempi <output id="tTimes">${fmtT(x.start)} → ${fmtT(x.end)}</output></div>
       <div class="row"><button class="btn" data-act="tstart">Inizia qui</button><button class="btn" data-act="tend">Finisci qui</button></div></div>
       <div class="row"><button class="btn" data-act="tdup">Duplica</button><button class="btn danger" data-act="tdel">Elimina testo</button></div>`;
-  } else if (sel.type === 'music'){
-    const mu = o, m = media.get(mu.mediaId);
-    h = `<h2>Musica <small>${esc(mu.name || '')}</small></h2>
-      ${range('mvol','Volume',0,1,0.01,mu.volume,pct)}
-      ${range('moff','Parti da',0,m?Math.max(0,m.duration-1):0,0.1,mu.offset,v=>fmtT(+v).replace(/\.\d+$/,''))}
-      <div class="grp"><div class="lab">Sfuma alla fine</div>${seg('mfo',[[0,'No'],[1,'1 s'],[2,'2 s'],[3,'3 s']],mu.fadeOut)}</div>
-      <p class="note">Per sentire meglio la musica, abbassa il volume delle clip video dal loro pannello.</p>
-      <div class="row"><button class="btn" data-act="mrep">Cambia brano</button><button class="btn danger" data-act="mdel">Rimuovi musica</button></div>`;
+  } else if (sel.type === 'audio'){
+    const au = o, m = media.get(au.mediaId);
+    h = `<h2>Audio <small>${esc(au.name || '')}</small></h2>
+      <div class="row"><button class="btn primary" data-act="cut">Taglia qui</button></div>
+      ${range('mvol','Volume',0,1,0.01,au.volume,pct)}
+      ${range('moff','Parti dal punto del brano',0,m?Math.max(0,m.duration-1):0,0.1,au.offset,v=>fmtT(+v).replace(/\.\d+$/,''))}
+      <div class="grp"><div class="lab">Entrata graduale</div>${seg('mfi',[[0,'No'],[1,'1 s'],[2,'2 s'],[3,'3 s']],au.fadeIn)}</div>
+      <div class="grp"><div class="lab">Sfuma alla fine</div>${seg('mfo',[[0,'No'],[1,'1 s'],[2,'2 s'],[3,'3 s']],au.fadeOut)}</div>
+      <div class="grp"><div class="lab">In timeline <output id="aTimes">${fmtT(au.start)} → ${fmtT(au.start + audLen(au))}</output></div>
+      <div class="row"><button class="btn" data-act="astart">Inizia qui</button><button class="btn" data-act="aend">Finisci qui</button></div></div>
+      <p class="note">Trascina il brano per spostarlo, le maniglie per accorciarlo. Per sentire meglio la musica abbassa il volume delle clip video.</p>
+      <div class="row"><button class="btn" data-act="adup">Duplica</button><button class="btn danger" data-act="adel">Elimina audio</button></div>`;
   } else if (sel.type === 'logo'){
     const lg = o;
     h = `<h2>Logo</h2>
@@ -1132,6 +1198,7 @@ function syncInspector(){
     const l = $('#lenO'); if (l) l.textContent = fmtS(clipLen(o));
   } else if (sel.type === 'clip'){ const d = $('#cdur'); if (d){ d.value = o.dur; $('#cdur_o').textContent = secs(o.dur); } }
   else if (sel.type === 'text'){ const t = $('#tTimes'); if (t) t.textContent = `${fmtT(o.start)} → ${fmtT(o.end)}`; }
+  else if (sel.type === 'audio'){ const t = $('#aTimes'); if (t) t.textContent = `${fmtT(o.start)} → ${fmtT(o.start + audLen(o))}`; const f = $('#moff'); if (f){ f.value = o.offset; $('#moff_o').textContent = fmtT(o.offset).replace(/\.\d+$/,''); } }
 }
 
 insp.addEventListener('input', e => {
@@ -1169,8 +1236,8 @@ insp.addEventListener('click', e => {
   if (e.target.closest('[data-act="done"]')){ select(null); return; }
   if (segB && o){
     const key = segB.parentElement.dataset.seg, v = segB.dataset.v;
-    const num = ['fin','fout','mfo'].includes(key);
-    const map = { fit:'fit', fin:'fadeIn', fout:'fadeOut', tstyle:'style', tanim:'anim', mfo:'fadeOut', lc:'corner' };
+    const num = ['fin','fout','mfo','mfi'].includes(key);
+    const map = { fit:'fit', fin:'fadeIn', fout:'fadeOut', tstyle:'style', tanim:'anim', mfo:'fadeOut', mfi:'fadeIn', lc:'corner' };
     pendingSnap = true;
     edit(() => {
       o[map[key]] = num ? +v : v;
@@ -1201,8 +1268,10 @@ insp.addEventListener('click', e => {
     case 'tend': edit(() => { o.end = Math.max(T, o.start + 0.3); }, { rebuild:true }); break;
     case 'tdup': edit(() => { const len = o.end - o.start; const c = { ...o, id:uid(), start:T, end:T + len }; P.texts.push(c); sel = { type:'text', id:c.id }; }, { rebuild:true }); break;
     case 'tdel': deleteSel(); break;
-    case 'mrep': $('#fileMusic').click(); break;
-    case 'mdel': deleteSel(); break;
+    case 'astart': edit(() => { o.start = Math.max(0, T); }, { rebuild:true }); break;
+    case 'aend': if (T > o.start + 0.3){ edit(() => { const m = media.get(o.mediaId); o.len = Math.min(T - o.start, m ? m.duration - o.offset : T - o.start); }, { rebuild:true }); } else toast('Porta la linea rossa dopo l’inizio del brano'); break;
+    case 'adup': edit(() => { const c = { ...o, id:uid(), start:o.start + audLen(o), len:audLen(o) }; P.audios.push(c); sel = { type:'audio', id:c.id }; }, { rebuild:true }); break;
+    case 'adel': deleteSel(); break;
     case 'lrep': $('#fileLogo').click(); break;
     case 'ldel': deleteSel(); break;
   }
@@ -1214,7 +1283,7 @@ function deleteSel(){
   pause(); snapshot();
   if (sel.type === 'clip') P.clips = P.clips.filter(c => c.id !== sel.id);
   else if (sel.type === 'text') P.texts = P.texts.filter(c => c.id !== sel.id);
-  else if (sel.type === 'music') P.music = null;
+  else if (sel.type === 'audio') P.audios = P.audios.filter(a => a.id !== sel.id);
   else if (sel.type === 'logo') P.logo = null;
   sel = null; T = Math.min(T, total());
   refresh(true);
@@ -1224,6 +1293,15 @@ function split(){
   if (sel && sel.type === 'text'){
     const x = findSel();
     if (T > x.start + 0.2 && T < x.end - 0.2){ snapshot(); const b = { ...x, id:uid(), start:T }; x.end = T; P.texts.push(b); sel = { type:'text', id:b.id }; refresh(true); return; }
+  }
+  if (sel && sel.type === 'audio'){
+    const a = findSel(), L = audLen(a);
+    if (T > a.start + 0.2 && T < a.start + L - 0.2){
+      snapshot(); const lt = T - a.start;
+      const b = { ...a, id:uid(), start:T, offset:a.offset + lt, len:L - lt, fadeIn:0 }; a.len = lt; a.fadeOut = 0;
+      P.audios.push(b); sel = { type:'audio', id:b.id }; refresh(true); return;
+    }
+    toast('Porta la linea rossa dentro il brano'); return;
   }
   const o = clipAt(T);
   if (!o){ toast('Niente da dividere qui'); return; }
@@ -1240,7 +1318,7 @@ function split(){
 }
 function addText(){
   pause(); snapshot();
-  const base = clipsDur() || musicSpan();
+  const base = clipsDur() || audiosEnd();
   const s = base ? clamp(T, 0, Math.max(0, base - 0.5)) : Math.max(0, T);
   const x = { id:uid(), text:'Gol!', style:'title', size:120, y:0.5, color:'#ffffff', bg:'#e63946', anim:'pop', start:s, end: base > s + 0.5 ? Math.min(base, s + 3) : s + 3 };
   P.texts.push(x); sel = { type:'text', id:x.id };
@@ -1256,14 +1334,74 @@ function addCard(){
   refresh(true);
 }
 
-$('#tMedia').onclick = () => $('#fileMedia').click();
+/* ---------- libreria del progetto ---------- */
+const ICO_AUD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
+function usedInTimeline(id){ return P.clips.some(c => c.mediaId === id) || P.audios.some(a => a.mediaId === id); }
+function insertIndexAt(t){
+  const o = clipAt(t);
+  if (!o) return P.clips.length;
+  return t - o.start < o.len/2 ? P.clips.indexOf(o.c) : P.clips.indexOf(o.c) + 1;
+}
+function addFromLibrary(id){
+  const m = media.get(id);
+  if (!m){ toast('Questo file va ricollegato: importalo di nuovo dalla Libreria', 4000); return; }
+  pause(); snapshot(); P.example = false;
+  if (m.type === 'audio'){
+    const cd = clipsDur();
+    const start = cd && T >= cd - 0.05 ? 0 : Math.max(0, T);
+    const len = cd > start + 0.5 ? Math.min(m.duration, cd - start) : m.duration;
+    const a = { id:uid(), mediaId:m.id, name:m.name, start, offset:0, len, volume:0.8, fadeIn:0, fadeOut: cd && Math.abs(start + len - cd) < 0.1 && m.duration > len ? 2 : 0 };
+    P.audios.push(a); sel = { type:'audio', id:a.id }; T = start;
+  } else {
+    const idx = insertIndexAt(T);
+    const c = m.type === 'image'
+      ? { id:uid(), kind:'image', mediaId:m.id, name:m.name, dur:3, fit:'cover', zoom:1, panX:0, panY:0, fadeIn:0, fadeOut:0 }
+      : { id:uid(), kind:'video', mediaId:m.id, name:m.name, in:0, out:m.duration, fit:'cover', zoom:1, panX:0, panY:0, volume:1, fadeIn:0, fadeOut:0 };
+    P.clips.splice(idx, 0, c); sel = { type:'clip', id:c.id };
+    T = layout().find(o => o.c === c).start;
+  }
+  refresh(true); scheduleSave(); followPlayhead();
+  toast(m.type === 'audio' ? `Audio aggiunto da ${fmtT(T).replace(/\.\d+$/,'')}` : 'Aggiunto alla timeline');
+}
+function openLibrary(highlight){
+  pause();
+  const hl = new Set(highlight || []);
+  const items = P.library.map(id => {
+    const m = media.get(id);
+    if (m) return { id, m, type:m.type, name:m.name, dur:m.duration };
+    const p = pendingRelink.find(x => x.id === id);
+    return p ? { id, m:null, type:p.type, name:p.name, dur:0 } : null;
+  }).filter(Boolean);
+  const groups = [['video','Video'],['image','Foto'],['audio','Audio']];
+  const row = it => {
+    const th = it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${it.m.thumb}')` : ''}"></div>`;
+    const used = usedInTimeline(it.id);
+    const info = !it.m ? '<span class="warn">Da ricollegare: importalo di nuovo</span>'
+      : `<span>${it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'')}${used ? ' · in timeline' : ''}</span>`;
+    return `<div class="litem${hl.has(it.id) ? ' new' : ''}">${th}<div class="linfo"><b>${esc(it.name)}</b>${info}</div>
+      <button class="btn primary" data-add="${it.id}" ${it.m ? '' : 'disabled'}>Aggiungi</button>
+      <button class="btn x" data-rm="${it.id}" aria-label="Togli dalla libreria" ${used ? 'disabled title="È in timeline"' : ''}>✕</button></div>`;
+  };
+  const body = items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('')
+    : '<p class="note">La libreria è vuota. Importa video, foto e canzoni: restano qui e li aggiungi alla timeline quando vuoi.</p>';
+  scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="libT">
+    <h3 id="libT">Libreria</h3>
+    <div class="row"><button class="btn primary" id="libImp">Importa file</button></div>
+    <p class="note">Puoi anche trascinare i file sulla finestra. <b>Aggiungi</b> mette l’elemento nel punto della linea rossa (${fmtT(T).replace(/\.\d+$/,'')}).</p>
+    <div class="lib">${body}</div>
+    <div class="row"><button class="btn" id="libClose">Chiudi</button></div>
+  </div>`;
+  scrim.hidden = false;
+  $('#libImp').onclick = () => $('#fileMedia').click();
+  $('#libClose').onclick = closeExport;
+  scrim.querySelector('.lib').addEventListener('click', e => {
+    const add = e.target.closest('[data-add]'), rm = e.target.closest('[data-rm]');
+    if (add){ closeExport(); addFromLibrary(add.dataset.add); }
+    else if (rm){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); openLibrary(); }
+  });
+}
+$('#tMedia').onclick = () => openLibrary();
 $('#fileMedia').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
-$('#tMusic').onclick = () => { if (P.music){ select({ type:'music', id:'music' }); } else $('#fileMusic').click(); };
-$('#fileMusic').onchange = async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-  try { const m = await loadAudio(f); media.set(m.id, m); await storeFile(m); snapshot(); P.music = { mediaId:m.id, name:m.name, offset:0, volume:P.music ? P.music.volume : 0.8, fadeOut:2 }; P.example = false; sel = { type:'music', id:'music' }; refresh(true); toast('Musica aggiunta'); }
-  catch(err){ toast('Questo file audio non si apre. Prova MP3 o M4A.', 4000); }
-};
 $('#tLogo').onclick = () => { if (P.logo) select({ type:'logo', id:'logo' }); else $('#fileLogo').click(); };
 $('#fileLogo').onchange = async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f) return;
@@ -1533,16 +1671,18 @@ async function renderMix(dur){
     if (c.fadeOut > 0){ g.gain.setValueAtTime(v, Math.max(s + Math.min(c.fadeIn, o.len/2), e - c.fadeOut)); g.gain.linearRampToValueAtTime(0, e); }
     if (c.in < buf.duration){ src.start(s, c.in, Math.min(o.len, buf.duration - c.in)); any = true; }
   }
-  if (P.music){
-    const buf = await getAudioBuffer(P.music.mediaId);
-    if (buf && P.music.offset < buf.duration){
-      const src = oc.createBufferSource(); src.buffer = buf;
-      const g = oc.createGain(); src.connect(g); g.connect(oc.destination);
-      const v = P.music.volume, fo = Math.min(P.music.fadeOut, dur/2);
-      g.gain.setValueAtTime(v, 0);
-      if (fo > 0){ g.gain.setValueAtTime(v, dur - fo); g.gain.linearRampToValueAtTime(0, dur); }
-      src.start(0, P.music.offset, Math.min(dur, buf.duration - P.music.offset)); any = true;
-    }
+  for (const a of P.audios){
+    const buf = await getAudioBuffer(a.mediaId);
+    if (!buf || a.offset >= buf.duration || a.start >= dur) continue;
+    const L = Math.min(audLen(a), buf.duration - a.offset, dur - a.start); if (L <= 0) continue;
+    const src = oc.createBufferSource(); src.buffer = buf;
+    const g = oc.createGain(); src.connect(g); g.connect(oc.destination);
+    const v = a.volume, s0 = a.start, e0 = a.start + L;
+    const fi = Math.min(a.fadeIn || 0, L/2), fo = Math.min(a.fadeOut || 0, L/2);
+    g.gain.setValueAtTime(fi > 0 ? 0 : v, s0);
+    if (fi > 0) g.gain.linearRampToValueAtTime(v, s0 + fi);
+    if (fo > 0){ g.gain.setValueAtTime(v, e0 - fo); g.gain.linearRampToValueAtTime(0, e0); }
+    src.start(s0, a.offset, L); any = true;
   }
   if (!any) return null;
   return await oc.startRendering();
@@ -1587,7 +1727,7 @@ async function exportVideo(opt, onProg, signal){
   let mix = null, acfg = null, acodec = null, audioNote = '';
   skippedAudio = new Set();
   try { mix = await renderMix(dur); } catch(e){ mix = null; audioNote = 'Audio non elaborabile: il video è uscito muto.'; }
-  if (skippedAudio.size) audioNote = `L’audio di ${[...skippedAudio].join(', ')} non è incluso: il file è troppo grande per elaborarne l’audio qui. ` + (P.music ? 'La musica invece c’è.' : 'Aggiungi una musica oppure usa un video più corto.');
+  if (skippedAudio.size) audioNote = `L’audio di ${[...skippedAudio].join(', ')} non è incluso: il file è troppo grande per elaborarne l’audio qui. ` + (P.audios.length ? 'La musica invece c’è.' : 'Aggiungi una musica oppure usa un video più corto.');
   if (signal.aborted) throw new DOMException('abort','AbortError');
   if (mix){
     if ('AudioEncoder' in window){
@@ -1796,7 +1936,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-01T22:57:56';
+const APP_BUILD = '2026-11-01T23:02:20';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
