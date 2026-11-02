@@ -2729,6 +2729,22 @@ async function ensureMediaLoaded(onProg){
   }
   if (missing.length) throw new Error(`Questi file non sono caricati: ${missing.join(', ')}. Importali di nuovo dalla Libreria (si ricollegano da soli) e riprova.`);
 }
+// misura l'audio di un MP4 già creato nel punto più forte del mix: true = si sente, false = muto, null = non verificabile
+async function verifyAudio(blob, mix){
+  try {
+    if (!('AudioDecoder' in window) || !mix) return null;
+    const d = mix.getChannelData(0), sr = mix.sampleRate, win = Math.floor(sr*0.5);
+    let best = 0, bestT = 0;
+    for (let i = 0; i + win < d.length; i += win){ let e = 0; for (let k = i; k < i + win; k += 8) e += d[k]*d[k]; if (e > best){ best = e; bestT = i/sr; } }
+    if (best === 0) return null;
+    const idx = await MP4A.index(blob);
+    if (!idx) return false;
+    const r = await MP4A.decodeRange(blob, idx, Math.max(0, bestT), bestT + 0.5);
+    if (!r) return false;
+    const c = r.buf.getChannelData(0); let e = 0; for (let k = 0; k < c.length; k += 8) e += c[k]*c[k];
+    return e > 1e-6;
+  } catch(e){ return false; }
+}
 async function exportVideo(opt, onProg, signal){
   await ensureMediaLoaded(onProg);
   if (!('VideoEncoder' in window)) throw new Error('Questo browser non può esportare video. Usa Chrome, Edge o Safari aggiornati.');
@@ -2771,7 +2787,7 @@ async function exportVideo(opt, onProg, signal){
   if (skippedAudio.size) notes.push(`Audio di ${[...skippedAudio].join(', ')} escluso: file troppo grande da elaborare.`);
   if (mixInfo.failed.length) notes.push(`Non riesco a leggere l’audio di ${mixInfo.failed.join(', ')}.`);
   if (signal.aborted) throw new DOMException('abort','AbortError');
-  if (mix) audioMode = acfg ? 'aac' : 'realtime';
+  if (mix) audioMode = acfg && opt.audioRec !== true ? 'aac' : 'realtime';
 
   const target = new Mp4Muxer.ArrayBufferTarget();
   const mopts = { target, video:{ codec:'avc', width:W, height:H, frameRate:fps }, fastStart:'in-memory', firstTimestampBehavior:'offset' };
@@ -2788,13 +2804,14 @@ async function exportVideo(opt, onProg, signal){
     const ae = new AudioEncoder({ output:(ch, meta) => {
       let data = new Uint8Array(ch.byteLength); ch.copyTo(data);
       // alcune versioni di Safari aggiungono l'intestazione ADTS: va tolta dentro un MP4
-      if (data.length > 7 && data[0] === 0xFF && (data[1] & 0xF0) === 0xF0){ const hl = (data[1] & 1) ? 7 : 9; data = data.subarray(hl); }
+      if (data.length > 7 && data[0] === 0xFF && (data[1] & 0xF6) === 0xF0){
+        const flen = ((data[3] & 3) << 11) | (data[4] << 3) | (data[5] >> 5);
+        if (flen === data.length){ const hl = (data[1] & 1) ? 7 : 9; data = data.subarray(hl); }
+      }
       const chunk = new EncodedAudioChunk({ type:ch.type, timestamp:ch.timestamp, duration:ch.duration ?? undefined, data });
       let m = meta;
       if (first){
-        const dc = meta && meta.decoderConfig;
-        const desc = dc && dc.description && dc.description.byteLength ? dc.description : asc;
-        m = { decoderConfig:{ codec:'mp4a.40.2', sampleRate:SR, numberOfChannels:2, description:desc } };
+        m = { decoderConfig:{ codec:'mp4a.40.2', sampleRate:SR, numberOfChannels:2, description:asc } };
         first = false;
       }
       chunks++; muxer.addAudioChunk(chunk, m);
@@ -2928,6 +2945,12 @@ async function exportVideo(opt, onProg, signal){
   if (encErr) throw encErr;
   muxer.finalize();
   let blob = new Blob([target.buffer], { type:'video/mp4' });
+  // controllo: riapro il file e misuro se l'audio si sente davvero; se è muto passo al registratore di sistema
+  if (audioMode === 'aac'){
+    onProg({ phase:'Controllo l’audio del file…', p:1 });
+    const ok = await verifyAudio(blob, mix);
+    if (ok === false){ audioMode = 'realtime'; notes.push('Il primo tentativo era muto: audio reinserito col registratore di sistema.'); }
+  }
   if (audioMode === 'realtime'){
     // il browser non ha un codificatore AAC: rifaccio un passaggio in tempo reale col registratore di sistema, che mette l'audio
     const out = await addAudioRealtime(blob, mix, W, H, fps, bitrate, onProg, signal);
@@ -2963,6 +2986,7 @@ function openExport(){
     <div class="grp"><div class="lab">Risoluzione</div>${seg('xres',[[720,'720p'],[1080,'1080p · '+showDims(1080)],[1440,'1440p'],[2160,'4K · '+showDims(2160)]],exportOpt.res)}</div>
     <div class="grp"><div class="lab">Fotogrammi al secondo</div>${seg('xfps',[[25,'25'],[30,'30'],[60,'60']],exportOpt.fps)}</div>
     <div class="grp"><div class="lab">Qualità</div>${seg('xq',[[1,'Alta'],[2,'Altissima'],[3,'Massima']],exportOpt.q)}</div>
+    <div class="grp"><div class="lab">Audio</div>${seg('xaud',[[0,'Automatico'],[1,'Registratore di sistema']],exportOpt.audioRec ? 1 : 0)}</div>
     <div class="grp"><div class="lab">Lettura dei video</div>${seg('xdec',[[1,'Veloce (nuova)'],[0,'Compatibile (come prima)']],exportOpt.decode === false ? 0 : 1)}</div>
     <p class="note" id="xest">${note()}</p>
     <div class="row"><button class="btn" id="xCancel">Chiudi</button><button class="btn primary" id="xGo">Avvia esportazione</button></div>
@@ -2970,6 +2994,7 @@ function openExport(){
   scrim.hidden = false;
   scrim.querySelector('.sheet').addEventListener('click', e => {
     const b = e.target.closest('[data-seg] button');
+    if (b && b.parentElement.dataset.seg === 'xaud'){ exportOpt.audioRec = b.dataset.v === '1'; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); try { localStorage.setItem('moviola:export', JSON.stringify(exportOpt)); } catch(err){} return; }
     if (b && b.parentElement.dataset.seg === 'xdec'){ exportOpt.decode = b.dataset.v === '1'; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); try { localStorage.setItem('moviola:export', JSON.stringify(exportOpt)); } catch(err){} return; }
     if (b){ const k = b.parentElement.dataset.seg; exportOpt[{ xres:'res', xfps:'fps', xq:'q' }[k]] = +b.dataset.v;
       b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
@@ -3107,7 +3132,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T01:37:54';
+const APP_BUILD = '2026-11-02T01:48:32';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
