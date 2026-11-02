@@ -2736,7 +2736,7 @@ async function exportVideo(opt, onProg, signal){
   // AAC (l'unico che funziona ovunque dentro un MP4): provo più combinazioni, Safari è esigente
   if ('AudioEncoder' in window){
     for (const [sr, br] of [[48000,256000],[48000,192000],[44100,256000],[44100,192000],[48000,128000],[44100,128000]]){
-      const cfg = { codec:'mp4a.40.2', sampleRate:sr, numberOfChannels:2, bitrate:br };
+      const cfg = { codec:'mp4a.40.2', sampleRate:sr, numberOfChannels:2, bitrate:br, aac:{ format:'aac' } };
       try { if ((await AudioEncoder.isConfigSupported(cfg)).supported){ acfg = cfg; break; } } catch(e){}
     }
   }
@@ -2756,7 +2756,24 @@ async function exportVideo(opt, onProg, signal){
 
   if (audioMode === 'aac'){
     let aErr = null, chunks = 0;
-    const ae = new AudioEncoder({ output:(ch, meta) => { chunks++; muxer.addAudioChunk(ch, meta); }, error:e => aErr = e });
+    // configurazione AAC (AudioSpecificConfig) nel caso il browser non la fornisca: senza, i lettori non sentono niente
+    const sfi = [96000,88200,64000,48000,44100,32000,24000,22050,16000,12000,11025,8000].indexOf(SR);
+    const asc = new Uint8Array([(2 << 3) | (sfi >> 1), ((sfi & 1) << 7) | (2 << 3)]);
+    let first = true;
+    const ae = new AudioEncoder({ output:(ch, meta) => {
+      let data = new Uint8Array(ch.byteLength); ch.copyTo(data);
+      // alcune versioni di Safari aggiungono l'intestazione ADTS: va tolta dentro un MP4
+      if (data.length > 7 && data[0] === 0xFF && (data[1] & 0xF0) === 0xF0){ const hl = (data[1] & 1) ? 7 : 9; data = data.subarray(hl); }
+      const chunk = new EncodedAudioChunk({ type:ch.type, timestamp:ch.timestamp, duration:ch.duration ?? undefined, data });
+      let m = meta;
+      if (first){
+        const dc = meta && meta.decoderConfig;
+        const desc = dc && dc.description && dc.description.byteLength ? dc.description : asc;
+        m = { decoderConfig:{ codec:'mp4a.40.2', sampleRate:SR, numberOfChannels:2, description:desc } };
+        first = false;
+      }
+      chunks++; muxer.addAudioChunk(chunk, m);
+    }, error:e => aErr = e });
     ae.configure(acfg);
     const N = mix.length, L = mix.getChannelData(0), Rr = mix.numberOfChannels > 1 ? mix.getChannelData(1) : L, step = 1024*4;
     for (let o = 0; o < N && !aErr; o += step){
@@ -3062,7 +3079,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T01:15:24';
+const APP_BUILD = '2026-11-02T01:33:02';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
