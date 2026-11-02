@@ -534,12 +534,21 @@ function pushProject(rec){
     .then(() => { lastPush = Date.now(); fbErr = ''; setSaveState('Sincronizzato'); syncUI(); })
     .catch(e => { fbErr = fbMsg(e); syncUI(); });
 }
+let remoteProjects = {}, remoteDeleted = {}, cloudFiles = {}, cloudReady = false, refs = [], cloudSkip = {};
 function startSync(){
   if (syncRef) return;
-  syncRef = fb.db.ref('moviola');
-  syncRef.on('value', snap => { mergeRemote(snap.val() || {}).catch(e => { fbErr = fbMsg(e); syncUI(); }); }, e => { fbErr = fbMsg(e); syncRef = null; syncUI(); });
+  syncRef = true;
+  const fail = e => { fbErr = fbMsg(e); syncUI(); };
+  const r1 = fb.db.ref('moviola/projects'), r2 = fb.db.ref('moviola/deleted'), r3 = fb.db.ref('moviola/files'), r4 = fb.db.ref('moviola/config');
+  refs = [r1, r2, r3, r4];
+  const r5 = fb.db.ref('moviola/skip'); refs.push(r5);
+  r5.on('value', s => { cloudSkip = s.val() || {}; }, () => {});
+  r4.on('value', s => { const c = s.val() || {}; if (c.googleClientId && c.googleClientId !== gClientId){ setClientId(c.googleClientId); syncUI(); } }, () => {});
+  r1.on('value', s => { remoteProjects = s.val() || {}; mergeRemote({ projects:remoteProjects, deleted:remoteDeleted }).catch(fail); }, fail);
+  r2.on('value', s => { remoteDeleted = s.val() || {}; mergeRemote({ projects:remoteProjects, deleted:remoteDeleted }).catch(fail); }, fail);
+  r3.on('value', s => { cloudFiles = s.val() || {}; cloudReady = true; onCloudFiles(); }, fail);
 }
-function stopSync(){ if (syncRef){ syncRef.off(); syncRef = null; } }
+function stopSync(){ refs.forEach(r => r.off()); refs = []; syncRef = null; cloudReady = false; }
 let merging = false;
 async function mergeRemote(all){
   if (merging) return; merging = true;
@@ -569,6 +578,7 @@ async function mergeRemote(all){
     }
     if (imported) toast(imported === 1 ? 'Arrivato 1 progetto da un altro dispositivo' : `Arrivati ${imported} progetti da altri dispositivi`);
     syncUI();
+    if (cloudReady && changedOpen) onCloudFiles();
   } finally { merging = false; }
 }
 // carica i file del progetto che mancano: dal dispositivo se ci sono, altrimenti "da ricollegare"
@@ -590,6 +600,222 @@ async function loadMissingMedia(){
   if (miss.length) toast(`Importa dalla Libreria: ${miss.map(p => p.name).join(', ')}. Si ricollegano da soli.`, 7000);
   runThumbs();
 }
+/* ---------- file nel cloud (1 GB del piano gratuito, file spezzati in pezzi nel database) ---------- */
+const CLOUD_LIMIT = 1e9, CHUNK = 512*1024;
+const uploading = new Map(), downloading = new Map();
+let cloudChain = Promise.resolve(), warned80 = false, warned95 = false, tooBigWarned = new Set();
+const cloudUsed = () => Object.values(cloudFiles).reduce((a, f) => a + (f && f.size && f.backend !== 'drive' ? f.size*4/3 : 0), 0);
+const driveUsedByMoviola = () => Object.values(cloudFiles).reduce((a, f) => a + (f && f.size && f.backend === 'drive' ? f.size : 0), 0);
+const fmtMB = b => b >= 1e9 ? (b/1e9).toFixed(2).replace('.', ',') + ' GB' : Math.round(b/1e6) + ' MB';
+const blobToB64 = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(b); });
+const b64ToBytes = s => { const bin = atob(s || ''); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+function cloudQueue(fn){ const p = cloudChain.then(fn).catch(e => { fbErr = fbMsg(e); syncUI(); }); cloudChain = p; return p; }
+/* ---------- Google Drive: i file vanno nella cartella "Moviola" del tuo Drive ---------- */
+let gClientId = '', gToken = null, gTokenExp = 0, gTokenClient = null, driveFolder = null, driveQuota = null, gisLoaded = false, driveErr = '';
+try { gClientId = localStorage.getItem('moviola:gclient') || ''; const t = JSON.parse(sessionStorage.getItem('moviola:gtok') || 'null'); if (t && t.exp > Date.now() + 60000){ gToken = t.tok; gTokenExp = t.exp; } } catch(e){}
+const driveOn = () => !!gClientId;
+const driveReady = () => !!gToken && gTokenExp > Date.now() + 60000;
+function loadGis(){
+  if (gisLoaded || (window.google && google.accounts && google.accounts.oauth2)){ gisLoaded = true; return Promise.resolve(); }
+  return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://accounts.google.com/gsi/client'; sc.async = true; sc.onload = () => { gisLoaded = true; res(); syncUI(); updateMissing(); }; sc.onerror = () => rej(new Error('Google non raggiungibile')); document.head.appendChild(sc); });
+}
+function setClientId(id){
+  gClientId = (id || '').trim(); try { localStorage.setItem('moviola:gclient', gClientId); } catch(e){}
+  if (gClientId) loadGis().catch(() => {});
+}
+// va chiamata da un tocco (Google apre una finestrella di accesso)
+function driveConnect(){
+  if (!gisLoaded){ loadGis().catch(() => {}); toast('Sto preparando l’accesso a Google: tocca di nuovo tra un attimo'); return Promise.reject(new Error('gis')); }
+  return new Promise((res, rej) => {
+    gTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id:gClientId, scope:'https://www.googleapis.com/auth/drive.file',
+      callback:r => {
+        if (r.error){ driveErr = 'Accesso a Google non riuscito: ' + r.error; syncUI(); rej(new Error(r.error)); return; }
+        gToken = r.access_token; gTokenExp = Date.now() + (r.expires_in || 3600)*1000; driveErr = '';
+        try { sessionStorage.setItem('moviola:gtok', JSON.stringify({ tok:gToken, exp:gTokenExp })); } catch(e){}
+        res(); driveQuotaRefresh(); onCloudFiles();
+      },
+      error_callback:e => { driveErr = e && e.type === 'popup_failed_to_open' ? 'Il browser ha bloccato la finestra di Google: consenti i popup e riprova.' : 'Accesso a Google annullato.'; syncUI(); rej(new Error('popup')); }
+    });
+    gTokenClient.requestAccessToken({ prompt:'' });
+  });
+}
+async function gfetch(url, opt = {}){
+  if (!driveReady()) throw new Error('drive-auth');
+  const r = await fetch(url, { ...opt, headers:{ ...(opt.headers || {}), Authorization:'Bearer ' + gToken } });
+  if (r.status === 401){ gToken = null; gTokenExp = 0; updateMissing(); syncUI(); throw new Error('drive-auth'); }
+  if (!r.ok && r.status !== 308) throw new Error('Google Drive ha risposto ' + r.status + (r.status === 403 ? ' (spazio pieno o permessi)' : ''));
+  return r;
+}
+const gjson = async (url, opt) => (await gfetch(url, opt)).json();
+async function driveFolderId(){
+  if (driveFolder) return driveFolder;
+  const q = encodeURIComponent("name='Moviola' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  const r = await gjson(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)&spaces=drive`);
+  if (r.files && r.files.length) return driveFolder = r.files[0].id;
+  const c = await gjson('https://www.googleapis.com/drive/v3/files?fields=id', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ name:'Moviola', mimeType:'application/vnd.google-apps.folder' }) });
+  return driveFolder = c.id;
+}
+async function driveQuotaRefresh(){
+  try { const r = await gjson('https://www.googleapis.com/drive/v3/about?fields=storageQuota'); driveQuota = { limit:+r.storageQuota.limit || 15e9, usage:+r.storageQuota.usage || 0 }; } catch(e){}
+  syncUI();
+}
+async function driveUpload(file, name, onp){
+  const parent = await driveFolderId();
+  const init = await gfetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id', {
+    method:'POST', headers:{ 'Content-Type':'application/json; charset=UTF-8', 'X-Upload-Content-Type':file.type || 'application/octet-stream', 'X-Upload-Content-Length':String(file.size) },
+    body:JSON.stringify({ name, parents:[parent] })
+  });
+  const loc = init.headers.get('Location'); if (!loc) throw new Error('Google Drive non ha dato l’indirizzo di caricamento');
+  const size = file.size, CH = 8*1024*1024; let off = 0, id = null;
+  while (off < size){
+    const end = Math.min(size, off + CH);
+    const r = await fetch(loc, { method:'PUT', headers:{ 'Content-Range':`bytes ${off}-${end-1}/${size}` }, body:file.slice(off, end) });
+    if (r.status === 308){ const rg = r.headers.get('Range'); off = rg ? +rg.split('-')[1] + 1 : end; }
+    else if (r.ok){ id = (await r.json()).id; off = size; }
+    else throw new Error('Caricamento su Drive interrotto (' + r.status + ')');
+    onp(off/size);
+  }
+  return id;
+}
+async function driveDownload(fileId, onp){
+  const r = await gfetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  const total = +r.headers.get('Content-Length') || 0;
+  if (!r.body || !total) return await r.blob();
+  const rd = r.body.getReader(), parts = []; let got = 0;
+  for (;;){ const { done, value } = await rd.read(); if (done) break; parts.push(value); got += value.length; onp(Math.min(1, got/total)); }
+  return new Blob(parts);
+}
+const driveFree = () => driveQuota ? driveQuota.limit - driveQuota.usage : Infinity;
+function cloudUpload(m){
+  if (!fbUser || !m || !m.file || uploading.has(m.id) || cloudSkip[m.id]) return;
+  const f = cloudFiles[m.id]; if (f && f.complete) return;
+  if (driveOn()){
+    if (!driveReady()) return;                       // si carica appena colleghi Drive
+    if (m.file.size > driveFree() - 50e6){
+      if (!tooBigWarned.has(m.id)){ tooBigWarned.add(m.id); toast(`${m.name} non entra nel tuo Google Drive (spazio libero ${fmtMB(Math.max(0, driveFree()))}). Su questo dispositivo funziona comunque.`, 6000); }
+      return;
+    }
+    uploading.set(m.id, 0); renderLibrary();
+    return cloudQueue(async () => {
+      try {
+        await fb.db.ref('moviola/files/' + m.id).set({ name:m.name, size:m.file.size, type:m.type, mime:m.file.type || '', backend:'drive', complete:false, at:Date.now() });
+        const driveId = await driveUpload(m.file, m.name, p => { uploading.set(m.id, p); renderLibrary(); });
+        await fb.db.ref('moviola/files/' + m.id).update({ driveId, complete:true });
+        driveQuotaRefresh();
+      } catch(e){ if (e.message !== 'drive-auth') toast(e.message, 5000); }
+      finally { uploading.delete(m.id); renderLibrary(); syncUI(); }
+    });
+  }
+  const need = m.file.size*4/3;
+  if (cloudUsed() + need > CLOUD_LIMIT*0.98){
+    if (!tooBigWarned.has(m.id)){ tooBigWarned.add(m.id); toast(`${m.name} (${fmtMB(m.file.size)}) non entra nel cloud: libera spazio da Progetti oppure collega Google Drive. Su questo dispositivo funziona comunque.`, 6000); }
+    return;
+  }
+  uploading.set(m.id, 0); renderLibrary();
+  return cloudQueue(async () => {
+    try {
+      const n = Math.max(1, Math.ceil(m.file.size/CHUNK));
+      await fb.db.ref('moviola/files/' + m.id).set({ name:m.name, size:m.file.size, type:m.type, mime:m.file.type || '', chunks:n, complete:false, at:Date.now() });
+      for (let i = 0; i < n; i++){
+        await fb.db.ref(`moviola/blobs/${m.id}/${i}`).set(await blobToB64(m.file.slice(i*CHUNK, (i+1)*CHUNK)));
+        uploading.set(m.id, (i+1)/n); if (i % 3 === 0 || i === n-1) renderLibrary();
+      }
+      await fb.db.ref('moviola/files/' + m.id + '/complete').set(true);
+    } finally { uploading.delete(m.id); renderLibrary(); syncUI(); }
+  });
+}
+let needDrive = false;
+function cloudDownload(id){
+  const f = cloudFiles[id];
+  if (!fbUser || !f || !f.complete || downloading.has(id) || media.has(id)) return;
+  if (f.backend === 'drive' && !driveReady()){ needDrive = true; updateMissing(); return; }
+  downloading.set(id, 0); updateMissing();
+  return cloudQueue(async () => {
+    try {
+      let file;
+      if (f.backend === 'drive'){
+        const blob = await driveDownload(f.driveId, p => { downloading.set(id, p); updateMissing(); });
+        file = new File([blob], f.name, { type:f.mime || blob.type || '' });
+      } else {
+        const parts = [];
+        for (let i = 0; i < f.chunks; i++){
+          const snap = await fb.db.ref(`moviola/blobs/${id}/${i}`).once('value');
+          parts.push(b64ToBytes(snap.val())); downloading.set(id, (i+1)/f.chunks); updateMissing();
+        }
+        file = new File(parts, f.name, { type:f.mime || '' });
+      }
+      const m = f.type === 'video' ? await loadVideo(file, id) : f.type === 'image' ? await loadImage(file, id) : await loadAudio(file, id);
+      media.set(id, m); storeFile(m); if (m.type === 'video') thumbQueue.push(m);
+      pendingRelink = pendingRelink.filter(p => p.id !== id);
+      if (!P.library.includes(id) && usedMediaIds(P).has(id)) P.library.push(id);
+    } catch(e){ if (e.message !== 'drive-auth') toast('Download non riuscito: ' + e.message, 5000); }
+    finally { downloading.delete(id); refresh(false); runThumbs(); }
+  });
+}
+// quando cambia l'elenco dei file nel cloud: scarico quelli che mancano qui, carico quelli che mancano là
+function onCloudFiles(){
+  if (!fbUser) return;
+  for (const id of usedMediaIds(P)){
+    if (media.has(id)) cloudUpload(media.get(id));
+    else cloudDownload(id);
+  }
+  const p = driveOn() && driveQuota ? driveQuota.usage/driveQuota.limit : cloudUsed()/CLOUD_LIMIT;
+  if (p > 0.95 && !warned95){ warned95 = true; toast(driveOn() ? 'Google Drive quasi pieno: libera spazio da Progetti.' : `Cloud quasi pieno (${fmtMB(cloudUsed())} di 1 GB): libera spazio da Progetti.`, 6000); }
+  else if (p > 0.8 && !warned80){ warned80 = true; toast(`Cloud all’${Math.round(p*100)}%: tra poco andranno tolti i file dei vecchi highlights.`, 5000); }
+  renderLibrary(); updateMissing(); syncUI();
+}
+// file del cloud non più usati da nessun progetto (locale o online)
+async function cloudUnused(){
+  const used = new Set();
+  Object.entries(remoteProjects).forEach(([id, r]) => { if (r && r.P && !(remoteDeleted[id] >= r.updated)) { try { usedMediaIds(JSON.parse(r.P)).forEach(x => used.add(x)); } catch(e){} } });
+  try { (await dbGetAll('projects')).forEach(r => usedMediaIds(r.P).forEach(x => used.add(x))); } catch(e){}
+  usedMediaIds(P).forEach(x => used.add(x));
+  return Object.keys(cloudFiles).filter(id => !used.has(id));
+}
+async function cloudDelete(id){
+  if (!fbUser) return;
+  const f = cloudFiles[id];
+  if (f && f.backend === 'drive' && f.driveId){
+    if (!driveReady()){ toast('Collega Google Drive per togliere questo file'); return; }
+    try { await gfetch(`https://www.googleapis.com/drive/v3/files/${f.driveId}`, { method:'DELETE' }); } catch(e){ if (!/404/.test(e.message)) { toast(e.message); return; } }
+    driveQuotaRefresh();
+  }
+  await fb.db.ref('moviola/blobs/' + id).remove(); await fb.db.ref('moviola/files/' + id).remove();
+}
+function projectsUsing(id){
+  const out = [];
+  Object.entries(remoteProjects).forEach(([pid, r]) => { if (r && r.P && r.P.includes('"' + id + '"')) out.push(r.name || 'Senza titolo'); });
+  return out;
+}
+function driveBlock(){
+  if (!gClientId) return `<div class="grp"><div class="lab">Google Drive</div>
+    <p class="note">Per avere 15 GB invece di 1 GB, incolla qui l’<b>ID client</b> creato nella Google Cloud Console. Basta farlo su un dispositivo: gli altri lo ricevono da soli.</p>
+    <input class="tin" id="gcid" placeholder="123456789-abc….apps.googleusercontent.com" autocomplete="off" aria-label="ID client Google">
+    <button class="btn" id="gcidSave">Salva ID client</button></div>`;
+  const q = driveQuota, p = q ? Math.min(1, q.usage/q.limit) : 0;
+  return `<div class="grp"><div class="lab">Google Drive ${q ? `<output>${fmtMB(q.usage)} di ${fmtMB(q.limit)}</output>` : ''}</div>
+    ${driveReady() ? `${q ? `<div class="prog"><i style="width:${Math.round(p*100)}%;background:${p > 0.95 ? 'var(--rec)' : p > 0.8 ? '#f59e0b' : 'var(--accent)'}"></i></div>` : ''}<p class="note"><b>Collegato</b> · i file stanno nella cartella <b>Moviola</b> del tuo Drive (${fmtMB(driveUsedByMoviola())}). Lo spazio è condiviso con Gmail e Google Foto.</p>`
+      : `<p class="note">Collega Drive per caricare e scaricare i file dei progetti. Il collegamento dura circa un’ora: dopo basta toccare di nuovo.</p><button class="btn primary" id="gConnect">Collega Google Drive</button>`}
+    ${driveErr ? `<p class="err">${esc(driveErr)}</p>` : ''}
+    <button class="btn" id="gcidReset" style="min-height:30px;font-size:12px">Cambia ID client</button></div>`;
+}
+function cloudBlock(){
+  if (!fbUser || !cloudReady) return '';
+  const dbFiles = Object.values(cloudFiles).some(f => f && f.backend !== 'drive');
+  if (driveOn() && !dbFiles) return driveBlock() + cloudFilesList();
+  const used = cloudUsed(), p = Math.min(1, used/CLOUD_LIMIT);
+  const files = Object.entries(cloudFiles).filter(([, f]) => f).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
+  return `<div class="grp"><div class="lab">File nel cloud <output>${fmtMB(used)} di 1 GB</output></div>
+    <div class="prog"><i style="width:${Math.round(p*100)}%;background:${p > 0.95 ? 'var(--rec)' : p > 0.8 ? '#f59e0b' : 'var(--accent)'}"></i></div>
+    <p class="note">Video e musica dei progetti vengono caricati qui e scaricati da soli sugli altri dispositivi. Le partite intere di solito non ci stanno: restano solo sul dispositivo dove le importi.</p></div>
+    ${driveBlock()}${cloudFilesList()}`;
+}
+function cloudFilesList(){
+  const files = Object.entries(cloudFiles).filter(([, f]) => f).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
+  return `<div class="grp">${files.length ? `<div class="lib">${files.map(([id, f]) => { const who = projectsUsing(id); return `<div class="litem"><div class="linfo"><b>${esc(f.name)}</b><span class="${who.length ? '' : 'warn'}">${fmtMB(f.backend === 'drive' ? f.size : f.size*4/3)} · ${f.backend === 'drive' ? 'Drive' : 'database'} · ${who.length ? esc(who.join(', ')) : 'non usato da nessun progetto'}${f.complete ? '' : ' · caricamento incompleto'}</span></div><button class="btn x" data-cdel="${id}" aria-label="Togli dal cloud">✕</button></div>`; }).join('')}</div>
+    <button class="btn" id="cloudClean">Libera spazio: togli i file non usati</button>` : '<p class="note">Nessun file nel cloud.</p>'}</div>`;
+}
 function syncBlock(){
   if (typeof firebase === 'undefined') return '<p class="note">La sincronizzazione funziona nell’app pubblicata su GitHub.</p>';
   fbInit();
@@ -597,7 +823,7 @@ function syncBlock(){
     <input class="tin" id="fbEmail" type="email" value="${esc(FB_EMAIL)}" autocomplete="username" aria-label="Email">
     <input class="tin" id="fbPw" type="password" placeholder="Password dell’Hub" autocomplete="current-password" aria-label="Password">
     <button class="btn primary" id="fbIn">Accedi e sincronizza</button>${fbErr ? `<p class="err">${esc(fbErr)}</p>` : ''}`;
-  return `<p class="note"><b>Attiva</b> · ${esc(fbUser.email || '')}${lastPush ? ' · ultimo invio ' + new Date(lastPush).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' }) : ''}</p>${fbErr ? `<p class="err">${esc(fbErr)}</p>` : ''}<button class="btn" id="fbOut">Esci</button>`;
+  return `<p class="note"><b>Attiva</b> · ${esc(fbUser.email || '')}${lastPush ? ' · ultimo invio ' + new Date(lastPush).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' }) : ''}</p>${fbErr ? `<p class="err">${esc(fbErr)}</p>` : ''}${cloudBlock()}<button class="btn" id="fbOut">Esci</button>`;
 }
 function syncUI(){
   const box = document.getElementById('syncBox'); if (!box) return;
@@ -609,6 +835,30 @@ function syncUI(){
     bi.disabled = true; bi.textContent = 'Accesso…';
     try { await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); await fb.auth.signInWithEmailAndPassword(em, pw); toast('Sincronizzazione attiva'); }
     catch(e){ fbErr = fbMsg(e); syncUI(); }
+  };
+  box.querySelectorAll('[data-cdel]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.cdel, who = projectsUsing(id);
+    if (who.length && b.dataset.armed !== '1'){ b.dataset.armed = '1'; b.textContent = 'Sicuro?'; toast(`È usato da: ${who.join(', ')}. Gli altri dispositivi dovranno importarlo a mano. Tocca di nuovo per togliere.`, 5000); return; }
+    b.disabled = true;
+    if (who.length){ try { await fb.db.ref('moviola/skip/' + id).set(true); cloudSkip[id] = true; } catch(e){} }
+    await cloudDelete(id); toast('Tolto dal cloud');
+  });
+  const gs = document.getElementById('gcidSave');
+  if (gs) gs.onclick = async () => {
+    const v = $('#gcid').value.trim();
+    if (!/\.apps\.googleusercontent\.com$/.test(v)){ toast('Non sembra un ID client: deve finire con .apps.googleusercontent.com'); return; }
+    setClientId(v); try { await fb.db.ref('moviola/config/googleClientId').set(v); } catch(e){}
+    toast('ID client salvato: ora tocca Collega Google Drive'); syncUI();
+  };
+  const gc = document.getElementById('gConnect');
+  if (gc) gc.onclick = () => { driveConnect().then(() => toast('Google Drive collegato')).catch(() => {}); };
+  const gr = document.getElementById('gcidReset');
+  if (gr) gr.onclick = () => { setClientId(''); gToken = null; syncUI(); };
+  const cc = document.getElementById('cloudClean');
+  if (cc) cc.onclick = async () => {
+    cc.disabled = true; const ids = await cloudUnused();
+    for (const id of ids) await cloudDelete(id);
+    toast(ids.length ? `Liberato spazio: ${ids.length} file tolti` : 'Nessun file inutilizzato'); cc.disabled = false;
   };
   const bo = document.getElementById('fbOut');
   if (bo) bo.onclick = () => { fb.auth.signOut(); toast('Sincronizzazione disattivata'); };
@@ -622,7 +872,7 @@ let thumbQueue = [], projectLoading = null;
 async function runThumbs(){ while (thumbQueue.length){ const m = thumbQueue.shift(); if (!m.thumb){ await makeThumb(m); renderTimeline(); renderLibrary(); } } }
 async function loadProject(rec){
   projectLoading = loadProjectInner(rec);
-  try { return await projectLoading; } finally { projectLoading = null; runThumbs(); }
+  try { return await projectLoading; } finally { projectLoading = null; runThumbs(); if (cloudReady) onCloudFiles(); }
 }
 async function loadProjectInner(rec){
   playing = false; setPlayIcon();
@@ -655,7 +905,10 @@ async function loadProjectInner(rec){
 }
 async function deleteProject(id){
   await dbDel('projects', id);
-  if (fbUser){ fb.db.ref('moviola/projects/' + id).remove().catch(() => {}); fb.db.ref('moviola/deleted/' + id).set(Date.now()).catch(() => {}); }
+  if (fbUser){
+    try { await fb.db.ref('moviola/projects/' + id).remove(); await fb.db.ref('moviola/deleted/' + id).set(Date.now()); delete remoteProjects[id]; } catch(e){}
+    try { for (const fid of await cloudUnused()) await cloudDelete(fid); } catch(e){}
+  }
   const rest = await dbGetAll('projects');
   const keep = new Set(); rest.forEach(r => usedMediaIds(r.P).forEach(x => keep.add(x)));
   if (id === projectId) usedMediaIds(P).forEach(x => keep.add(x));
@@ -1217,7 +1470,7 @@ async function importFiles(files, quiet){
       if (isAudio(f)) m = await loadAudio(f);
       else if (isImage(f)) m = await loadImage(f);
       else { m = await loadVideo(f); await makeThumb(m); }
-      media.set(m.id, m); storeFile(m);
+      media.set(m.id, m); storeFile(m); cloudUpload(m);
       if (!added) snapshot();
       P.library.push(m.id); newIds.push(m.id); added++;
     } catch(e){ failed.push(f.name); }
@@ -2125,7 +2378,8 @@ function libItems(){
   }).filter(Boolean);
 }
 const thumbHTML = it => it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${it.m.thumb}')` : ''}"></div>`;
-const durTxt = it => !it.m ? 'da ricollegare' : it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'');
+const cloudTxt = id => uploading.has(id) ? ` · ☁ ${Math.round(uploading.get(id)*100)}%` : downloading.has(id) ? ` · ⬇ ${Math.round(downloading.get(id)*100)}%` : (cloudFiles[id] && cloudFiles[id].complete) ? ' · ☁' : '';
+const durTxt = it => (!it.m ? (downloading.has(it.id) ? 'scarico dal cloud' : 'da ricollegare') : it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'')) + cloudTxt(it.id);
 const ICO_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 function renderLibrary(){
   const items = libItems();
@@ -2481,11 +2735,18 @@ function updateMissing(){
   const bar = $('#missbar');
   bar.hidden = !miss.length;
   if (miss.length){
-    $('#missTitle').textContent = miss.length === 1 ? 'Manca 1 file su questo dispositivo' : `Mancano ${miss.length} file su questo dispositivo`;
+    const dl = [...downloading.values()];
+    $('#missTitle').textContent = dl.length ? `Scarico dal cloud… ${Math.round(dl.reduce((a, b) => a + b, 0)/dl.length*100)}%` : miss.length === 1 ? 'Manca 1 file su questo dispositivo' : `Mancano ${miss.length} file su questo dispositivo`;
     $('#missList').textContent = miss.join(' · ');
+    const viaDrive = needDrive && driveOn() && !driveReady() && !dl.length;
+    $('#missImp').textContent = viaDrive ? 'Collega Drive e scarica' : 'Importa i file';
+    if (viaDrive) $('#missTitle').textContent = 'File su Google Drive: collegalo per scaricarli';
   }
 }
-$('#missImp').onclick = () => { setLibOpen(true); $('#fileMedia').click(); };
+$('#missImp').onclick = () => {
+  if (needDrive && driveOn() && !driveReady()){ driveConnect().then(() => { needDrive = false; onCloudFiles(); }).catch(() => {}); return; }
+  setLibOpen(true); $('#fileMedia').click();
+};
 function refresh(rebuild){
   $('#hint').hidden = !P.example;
   updateMissing();
@@ -3407,7 +3668,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T14:10:06';
+const APP_BUILD = '2026-11-02T15:45:21';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
@@ -3445,6 +3706,7 @@ try { if (localStorage.getItem('moviola:updated')){ localStorage.removeItem('mov
 
 /* ---------- boot ---------- */
 try { fbInit(); } catch(e){}
+if (gClientId) loadGis().catch(() => {});
 window.addEventListener('resize', () => renderTimeline());
 sizePreview(); renderTimeline(); renderInspector(); updateTime();
 T = 1.6; updateTime(); draw();
