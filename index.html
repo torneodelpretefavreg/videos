@@ -274,6 +274,11 @@ select.tin{appearance:auto}
 .dropzone div{border:3px dashed var(--accent);border-radius:20px;padding:40px 28px;text-align:center;display:flex;flex-direction:column;gap:8px;max-width:520px;width:100%}
 .dropzone b{font-family:var(--f-disp);font-weight:400;font-size:34px;letter-spacing:.03em;text-transform:uppercase;color:var(--accent)}
 .dropzone span{color:var(--fg);font-size:15px}
+.missbar{position:absolute;left:10px;right:10px;top:50px;z-index:5;margin:auto;max-width:520px;display:flex;gap:10px;align-items:center;background:rgba(14,18,24,.94);border:1px solid var(--accent);border-radius:12px;padding:10px 12px;backdrop-filter:blur(6px)}
+.missbar div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.missbar b{font-family:var(--f-cond);font-size:15px;letter-spacing:.03em;text-transform:uppercase;color:var(--accent)}
+.missbar span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.missbar .btn{flex:0 0 auto}
 /* export sheet */
 .scrim{position:fixed;inset:0;background:rgba(3,5,8,.72);z-index:50;display:flex;align-items:flex-end;justify-content:center;padding:0 max(0px,env(safe-area-inset-right,0px)) 0 max(0px,env(safe-area-inset-left,0px))}
 @media (min-width:640px){.scrim{align-items:center}}
@@ -315,6 +320,7 @@ select.tin{appearance:auto}
           <button class="chip go" id="mk10">−10 s</button>
           <button class="chip done" id="mkDone">Fatto · 0</button>
         </div>
+        <div class="missbar" id="missbar" hidden><div><b id="missTitle"></b><span id="missList"></span></div><button class="btn primary" id="missImp">Importa i file</button></div>
         <div class="hint" id="hint">Progetto di esempio. Apri la <b>Libreria</b> per importare video, foto e musica, oppure trascinali qui.</div>
       </section>
 
@@ -1011,6 +1017,13 @@ function drawClipTo(g, W, H, c, lt, live){
     g.fillStyle = gr; g.fillRect(0,0,W,H);
   } else {
     const m = media.get(c.mediaId);
+    if (!m && renderMode === 'preview'){
+      const mm = (P.mediaMeta || {})[c.mediaId], u = Math.min(W, H);
+      g.fillStyle = '#1a1f28'; g.fillRect(0, 0, W, H);
+      g.fillStyle = '#f5c542'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = `800 ${Math.round(u*0.055)}px "Barlow Condensed", sans-serif`; g.fillText('FILE DA IMPORTARE', W/2, H/2 - u*0.04);
+      g.fillStyle = '#e8ecf2'; g.font = `600 ${Math.round(u*0.04)}px Barlow, sans-serif`; g.fillText((mm && mm.name) || c.name || 'video', W/2, H/2 + u*0.04, W*0.9);
+    }
     if (m){
       // rotazione scelta dall'utente (0/90/180/270), sommata a quella del file
       const ur = ((c.rot || 0) % 360 + 360) % 360;
@@ -2462,8 +2475,20 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowRight'){ pause(); setT(T + (e.shiftKey ? 1 : 1/30)); }
 });
 
+function updateMissing(){
+  const used = usedMediaIds(P);
+  const miss = [...used].filter(id => !media.has(id)).map(id => { const p = pendingRelink.find(x => x.id === id); const mm = (P.mediaMeta || {})[id]; return (p && p.name) || (mm && mm.name) || 'un file'; });
+  const bar = $('#missbar');
+  bar.hidden = !miss.length;
+  if (miss.length){
+    $('#missTitle').textContent = miss.length === 1 ? 'Manca 1 file su questo dispositivo' : `Mancano ${miss.length} file su questo dispositivo`;
+    $('#missList').textContent = miss.join(' · ');
+  }
+}
+$('#missImp').onclick = () => { setLibOpen(true); $('#fileMedia').click(); };
 function refresh(rebuild){
   $('#hint').hidden = !P.example;
+  updateMissing();
   renderLibrary();
   sizePreview();
   renderTimeline();
@@ -3382,7 +3407,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T02:43:14';
+const APP_BUILD = '2026-11-02T14:10:06';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
