@@ -2847,7 +2847,7 @@ async function exportVideo(opt, onProg, signal){
     if (encErr) throw encErr;
     const t = tAt(i), o = clipAt(t);
     // percorso principale: fotogrammi letti dal file e decodificati dal chip video
-    if (o && o.c.kind === 'video'){
+    if (o && o.c.kind === 'video' && opt.decode !== false){
       const srcT = Math.min(o.c.in + (t - o.start)*spd(o.c), o.c.out - 1e-3);
       let lf = null;
       try { lf = await liveFrameFor(o.c, srcT); } catch(e){ closeLiveDec(); vInfoCache.set(o.c.mediaId, null); lf = null; }
@@ -2919,12 +2919,14 @@ function openExport(){
     <div class="grp"><div class="lab">Risoluzione</div>${seg('xres',[[720,'720p'],[1080,'1080p · '+showDims(1080)],[1440,'1440p'],[2160,'4K · '+showDims(2160)]],exportOpt.res)}</div>
     <div class="grp"><div class="lab">Fotogrammi al secondo</div>${seg('xfps',[[25,'25'],[30,'30'],[60,'60']],exportOpt.fps)}</div>
     <div class="grp"><div class="lab">Qualità</div>${seg('xq',[[1,'Alta'],[2,'Altissima'],[3,'Massima']],exportOpt.q)}</div>
+    <div class="grp"><div class="lab">Lettura dei video</div>${seg('xdec',[[1,'Veloce (nuova)'],[0,'Compatibile (come prima)']],exportOpt.decode === false ? 0 : 1)}</div>
     <p class="note" id="xest">${note()}</p>
     <div class="row"><button class="btn" id="xCancel">Chiudi</button><button class="btn primary" id="xGo">Avvia esportazione</button></div>
   </div>`;
   scrim.hidden = false;
   scrim.querySelector('.sheet').addEventListener('click', e => {
     const b = e.target.closest('[data-seg] button');
+    if (b && b.parentElement.dataset.seg === 'xdec'){ exportOpt.decode = b.dataset.v === '1'; b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); try { localStorage.setItem('moviola:export', JSON.stringify(exportOpt)); } catch(err){} return; }
     if (b){ const k = b.parentElement.dataset.seg; exportOpt[{ xres:'res', xfps:'fps', xq:'q' }[k]] = +b.dataset.v;
       b.parentElement.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
       try { localStorage.setItem('moviola:export', JSON.stringify(exportOpt)); } catch(err){}
@@ -3060,7 +3062,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T01:04:43';
+const APP_BUILD = '2026-11-02T01:15:24';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
@@ -3073,7 +3075,8 @@ async function checkUpdate(manual, atOpen){
     if (!r.ok) throw new Error(r.status);
     const m = (await r.text()).match(BUILD_RE);
     if (!m){ if (manual) toast('Non riesco a leggere la versione online'); return; }
-    if (m[1] !== APP_BUILD){
+    // aggiorna solo verso versioni PIÙ NUOVE (mai tornare indietro se GitHub serve ancora un file vecchio)
+    if (m[1] > APP_BUILD){
       // all'apertura, se non hai ancora toccato niente, aggiorna da solo; mentre lavori mostra solo l'avviso
       if (atOpen && !userActed && $('#scrim').hidden){ toast('Aggiorno all’ultima versione…', 0); applyUpdate(); return; }
       if (manual || updDismissed !== m[1]){ $('#upd').hidden = false; $('#upd').dataset.v = m[1]; }
