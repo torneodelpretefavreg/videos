@@ -492,7 +492,13 @@ function clearMedia(){
   for (const m of media.values()){ try { m.el.pause && m.el.pause(); m.el.removeAttribute('src'); m.el.remove(); URL.revokeObjectURL(m.url); } catch(e){} }
   media.clear(); audioCache.clear();
 }
+let thumbQueue = [], projectLoading = null;
+async function runThumbs(){ while (thumbQueue.length){ const m = thumbQueue.shift(); if (!m.thumb){ await makeThumb(m); renderTimeline(); renderLibrary(); } } }
 async function loadProject(rec){
+  projectLoading = loadProjectInner(rec);
+  try { return await projectLoading; } finally { projectLoading = null; runThumbs(); }
+}
+async function loadProjectInner(rec){
   playing = false; setPlayIcon();
   clearMedia();
   projectId = rec.id; P = normalize(rec.P); sel = null; T = 0;
@@ -508,7 +514,7 @@ async function loadProject(rec){
       if (!f.blob){ pendingRelink.push({ id, type:f.type, name:f.name, size:f.size }); continue; }
       const file = f.blob instanceof File ? f.blob : new File([f.blob], f.name || 'media', { type:f.blob.type });
       let m;
-      if (f.type === 'video'){ m = await loadVideo(file, id); await makeThumb(m); }
+      if (f.type === 'video'){ m = await loadVideo(file, id); thumbQueue.push(m); }
       else if (f.type === 'image') m = await loadImage(file, id);
       else m = await loadAudio(file, id);
       media.set(id, m);
@@ -2705,7 +2711,26 @@ async function addAudioRealtime(videoBlob, mix, W, H, fps, bitrate, onProg, sign
   } catch(e){ if (e && e.name === 'AbortError') throw e; return null; }
   finally { URL.revokeObjectURL(url); v.removeAttribute('src'); v.remove(); }
 }
+async function ensureMediaLoaded(onProg){
+  if (projectLoading){ onProg({ phase:'Attendo il caricamento dei video…', p:0 }); try { await projectLoading; } catch(e){} }
+  const need = new Set(); P.clips.forEach(c => c.mediaId && need.add(c.mediaId)); P.audios.forEach(a => need.add(a.mediaId)); if (P.logo) need.add(P.logo.mediaId);
+  const missing = [];
+  for (const id of need){
+    if (media.has(id)) continue;
+    try {
+      const f = await dbGet('files', id);
+      if (f && f.blob){
+        const file = f.blob instanceof File ? f.blob : new File([f.blob], f.name || 'media', { type:f.blob.type });
+        const m = f.type === 'video' ? await loadVideo(file, id) : f.type === 'image' ? await loadImage(file, id) : await loadAudio(file, id);
+        media.set(id, m); continue;
+      }
+      missing.push(f && f.name || 'un file');
+    } catch(e){ missing.push('un file'); }
+  }
+  if (missing.length) throw new Error(`Questi file non sono caricati: ${missing.join(', ')}. Importali di nuovo dalla Libreria (si ricollegano da soli) e riprova.`);
+}
 async function exportVideo(opt, onProg, signal){
+  await ensureMediaLoaded(onProg);
   if (!('VideoEncoder' in window)) throw new Error('Questo browser non può esportare video. Usa Chrome, Edge o Safari aggiornati.');
   if (!window.Mp4Muxer) throw new Error('Il modulo di esportazione MP4 non si è caricato. Controlla la connessione e ricarica la pagina.');
   const dur = total();
@@ -2811,7 +2836,9 @@ async function exportVideo(opt, onProg, signal){
   const slowClips = new Set();
   // Percorso veloce: il video scorre e i fotogrammi vengono catturati mentre passano (niente salti per ogni fotogramma)
   const runPlayback = (o, i0, i1) => new Promise((resolve) => {
-    const cl = o.c, m = media.get(cl.mediaId), el = m.el, sp = spd(cl);
+    const cl = o.c, m = media.get(cl.mediaId);
+    if (!m){ resolve(i0); return; }
+    const el = m.el, sp = spd(cl);
     const ts = i => cl.in + (tAt(i) - o.start)*sp;
     let i = i0, done = false, rate = 1, lastMt = null, fdur = 1/30, calls = 0, maxWork = 0, skips = 0, wd = 0;
     const finish = () => { if (done) return; done = true; clearTimeout(wd); el.pause(); try { el.playbackRate = 1; } catch(e){} resolve(i); };
@@ -2987,7 +3014,8 @@ async function runExport(){
     abortCtl = null;
     if (err && err.name === 'AbortError'){ closeExport(); toast('Esportazione annullata'); }
     else {
-      sheet.innerHTML = `<h3>Esportazione non riuscita</h3><p class="err">${esc(err && err.message ? err.message : String(err))}</p>
+      const where = err && err.stack ? String(err.stack).split('\n').slice(0, 2).join(' | ') : '';
+      sheet.innerHTML = `<h3>Esportazione non riuscita</h3><p class="err">${esc(err && err.message ? err.message : String(err))}</p>${where ? `<p class="note" style="font-size:11px;opacity:.7">${esc(where)}</p>` : ''}
         <p class="note">Se il problema è la memoria, prova 720p oppure accorcia il video.</p>
         <div class="row"><button class="btn" id="xClose">Chiudi</button></div>`;
       $('#xClose').onclick = closeExport;
@@ -3079,7 +3107,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T01:33:02';
+const APP_BUILD = '2026-11-02T01:37:54';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
