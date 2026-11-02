@@ -20,6 +20,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700;800&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
 /* Layout: editor a una colonna su telefono (anteprima, trasporto, strumenti, timeline, pannello); su desktop pannello a destra. Tema scuro da sala di montaggio, unico. */
 :root{
@@ -483,11 +486,126 @@ async function saveNow(){
     render(c.getContext('2d'), c.width, c.height, Math.min(T, Math.max(0, total()-0.01)));
     thumb = c.toDataURL('image/jpeg', 0.6);
   } catch(e){}
+  // nome e dimensione dei file usati: servono per ricollegarli su un altro dispositivo
+  const used = usedMediaIds(P); P.mediaMeta = P.mediaMeta || {};
+  for (const id of used){ const m = media.get(id); if (m) P.mediaMeta[id] = { name:m.name, size:m.file ? m.file.size : 0, type:m.type, duration:m.duration || 0 }; }
+  for (const id of Object.keys(P.mediaMeta)) if (!used.has(id)) delete P.mediaMeta[id];
   try {
-    await dbPut('projects', { id:projectId, name:P.name || 'Senza titolo', updated:Date.now(), duration:total(), thumb, P:JSON.parse(JSON.stringify(P)) });
+    const rec = { id:projectId, name:P.name || 'Senza titolo', updated:Date.now(), duration:total(), thumb, P:JSON.parse(JSON.stringify(P)) };
+    await dbPut('projects', rec);
     try { localStorage.setItem('moviola:last', projectId); } catch(e){}
     setSaveState('Salvato');
+    if (fbUser) pushProject(rec);
   } catch(e){ setSaveState('Non salvato'); }
+}
+
+/* ---------- sincronizzazione tra dispositivi (Firebase dell'Hub, sezione "moviola") ---------- */
+const FB_CONFIG = {
+  apiKey: "AIzaSyAzucVCOGBzPKErG2Szm9bL_mFnA8ihXqs",
+  authDomain: "hubdavide-40287.firebaseapp.com",
+  databaseURL: "https://hubdavide-40287-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "hubdavide-40287",
+  storageBucket: "hubdavide-40287.firebasestorage.app",
+  messagingSenderId: "450862351417",
+  appId: "1:450862351417:web:0540962bbfd9c2869d79e8"
+};
+const FB_EMAIL = "futsalfabbrico@gmail.com";
+const DEVICE = (() => { try { let d = localStorage.getItem('moviola:device'); if (!d){ d = uid() + uid(); localStorage.setItem('moviola:device', d); } return d; } catch(e){ return uid(); } })();
+let fb = null, fbUser = null, fbErr = '', lastPush = 0, syncRef = null;
+function fbInit(){
+  if (fb || typeof firebase === 'undefined') return fb;
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(FB_CONFIG);
+    fb = { auth:firebase.auth(), db:firebase.database() };
+    fb.auth.onAuthStateChanged(u => { fbUser = u; if (u) startSync(); else stopSync(); syncUI(); });
+  } catch(e){ fbErr = e.message; fb = null; }
+  return fb;
+}
+const fbMsg = e => /permission/i.test(e && (e.code || e.message) || '') ? 'Permesso negato dal database: nelle regole del Realtime Database dell’Hub serve l’accesso alla sezione "moviola" per gli utenti collegati.' : /password|credential|user-not-found|invalid/i.test(e && (e.code || e.message) || '') ? 'Password non corretta.' : /network/i.test(e && (e.code || e.message) || '') ? 'Nessuna connessione: riprova.' : (e && e.message) || 'Errore di sincronizzazione';
+function pushProject(rec){
+  if (!fbUser || !fb) return;
+  fb.db.ref('moviola/projects/' + rec.id).set({ name:rec.name, updated:rec.updated, duration:rec.duration || 0, thumb:rec.thumb || '', device:DEVICE, P:JSON.stringify(rec.P) })
+    .then(() => { lastPush = Date.now(); fbErr = ''; setSaveState('Sincronizzato'); syncUI(); })
+    .catch(e => { fbErr = fbMsg(e); syncUI(); });
+}
+function startSync(){
+  if (syncRef) return;
+  syncRef = fb.db.ref('moviola');
+  syncRef.on('value', snap => { mergeRemote(snap.val() || {}).catch(e => { fbErr = fbMsg(e); syncUI(); }); }, e => { fbErr = fbMsg(e); syncRef = null; syncUI(); });
+}
+function stopSync(){ if (syncRef){ syncRef.off(); syncRef = null; } }
+let merging = false;
+async function mergeRemote(all){
+  if (merging) return; merging = true;
+  try {
+    fbErr = '';
+    const remote = all.projects || {}, deleted = all.deleted || {};
+    const local = await dbGetAll('projects'), lmap = new Map(local.map(r => [r.id, r]));
+    let changedOpen = null, imported = 0;
+    for (const [id, r] of Object.entries(remote)){
+      if (!r || !r.P || deleted[id] >= r.updated) continue;
+      const l = lmap.get(id);
+      if (!l || r.updated > l.updated){
+        let p; try { p = JSON.parse(r.P); } catch(e){ continue; }
+        await dbPut('projects', { id, name:r.name, updated:r.updated, duration:r.duration || 0, thumb:r.thumb || '', P:p });
+        if (!l) imported++;
+        if (id === projectId && r.device !== DEVICE) changedOpen = p;
+      }
+    }
+    // progetti di questo dispositivo che mancano online (o sono più recenti): li invio
+    for (const l of local){ const r = remote[l.id]; if ((!r || l.updated > r.updated) && !(deleted[l.id] >= l.updated)) pushProject(l); }
+    // progetti eliminati su un altro dispositivo
+    for (const [id, t] of Object.entries(deleted)){ const l = lmap.get(id); if (l && l.updated <= t && id !== projectId) await dbDel('projects', id); }
+    if (changedOpen){
+      P = normalize(changedOpen); sel = null; multi = []; T = Math.min(T, total());
+      await loadMissingMedia(); refresh(true);
+      toast('Progetto aggiornato da un altro dispositivo');
+    }
+    if (imported) toast(imported === 1 ? 'Arrivato 1 progetto da un altro dispositivo' : `Arrivati ${imported} progetti da altri dispositivi`);
+    syncUI();
+  } finally { merging = false; }
+}
+// carica i file del progetto che mancano: dal dispositivo se ci sono, altrimenti "da ricollegare"
+async function loadMissingMedia(){
+  for (const id of usedMediaIds(P)){
+    if (media.has(id) || pendingRelink.some(p => p.id === id)) continue;
+    let f = null; try { f = await dbGet('files', id); } catch(e){}
+    if (f && f.blob){
+      try {
+        const file = f.blob instanceof File ? f.blob : new File([f.blob], f.name || 'media', { type:f.blob.type });
+        const m = f.type === 'video' ? await loadVideo(file, id) : f.type === 'image' ? await loadImage(file, id) : await loadAudio(file, id);
+        media.set(id, m); if (m.type === 'video') thumbQueue.push(m); continue;
+      } catch(e){}
+    }
+    const mm = (P.mediaMeta || {})[id] || (f && { type:f.type, name:f.name, size:f.size });
+    if (mm) pendingRelink.push({ id, type:mm.type, name:mm.name, size:mm.size });
+  }
+  const miss = pendingRelink.filter(p => usedMediaIds(P).has(p.id));
+  if (miss.length) toast(`Importa dalla Libreria: ${miss.map(p => p.name).join(', ')}. Si ricollegano da soli.`, 7000);
+  runThumbs();
+}
+function syncBlock(){
+  if (typeof firebase === 'undefined') return '<p class="note">La sincronizzazione funziona nell’app pubblicata su GitHub.</p>';
+  fbInit();
+  if (!fbUser) return `<p class="note">Accedi con la password dell’Hub per ritrovare i progetti su Mac, iPhone e iPad. I video restano su ogni dispositivo: si importano una volta e si ricollegano da soli.</p>
+    <input class="tin" id="fbEmail" type="email" value="${esc(FB_EMAIL)}" autocomplete="username" aria-label="Email">
+    <input class="tin" id="fbPw" type="password" placeholder="Password dell’Hub" autocomplete="current-password" aria-label="Password">
+    <button class="btn primary" id="fbIn">Accedi e sincronizza</button>${fbErr ? `<p class="err">${esc(fbErr)}</p>` : ''}`;
+  return `<p class="note"><b>Attiva</b> · ${esc(fbUser.email || '')}${lastPush ? ' · ultimo invio ' + new Date(lastPush).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' }) : ''}</p>${fbErr ? `<p class="err">${esc(fbErr)}</p>` : ''}<button class="btn" id="fbOut">Esci</button>`;
+}
+function syncUI(){
+  const box = document.getElementById('syncBox'); if (!box) return;
+  box.innerHTML = syncBlock();
+  const bi = document.getElementById('fbIn');
+  if (bi) bi.onclick = async () => {
+    const em = $('#fbEmail').value.trim(), pw = $('#fbPw').value;
+    if (!pw){ toast('Scrivi la password'); return; }
+    bi.disabled = true; bi.textContent = 'Accesso…';
+    try { await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL); await fb.auth.signInWithEmailAndPassword(em, pw); toast('Sincronizzazione attiva'); }
+    catch(e){ fbErr = fbMsg(e); syncUI(); }
+  };
+  const bo = document.getElementById('fbOut');
+  if (bo) bo.onclick = () => { fb.auth.signOut(); toast('Sincronizzazione disattivata'); };
 }
 function clearMedia(){
   pauseMedia();
@@ -512,7 +630,7 @@ async function loadProjectInner(rec){
   for (const id of ids){
     try {
       const f = await dbGet('files', id);
-      if (!f){ missing++; continue; }
+      if (!f){ const mm = (P.mediaMeta || {})[id]; if (mm) pendingRelink.push({ id, type:mm.type, name:mm.name, size:mm.size }); else missing++; continue; }
       if (!f.blob){ pendingRelink.push({ id, type:f.type, name:f.name, size:f.size }); continue; }
       const file = f.blob instanceof File ? f.blob : new File([f.blob], f.name || 'media', { type:f.blob.type });
       let m;
@@ -531,6 +649,7 @@ async function loadProjectInner(rec){
 }
 async function deleteProject(id){
   await dbDel('projects', id);
+  if (fbUser){ fb.db.ref('moviola/projects/' + id).remove().catch(() => {}); fb.db.ref('moviola/deleted/' + id).set(Date.now()).catch(() => {}); }
   const rest = await dbGetAll('projects');
   const keep = new Set(); rest.forEach(r => usedMediaIds(r.P).forEach(x => keep.add(x)));
   if (id === projectId) usedMediaIds(P).forEach(x => keep.add(x));
@@ -1075,7 +1194,7 @@ async function importFiles(files, quiet){
       if (pm){
         const m = pm.type === 'video' ? await loadVideo(f, pm.id) : pm.type === 'image' ? await loadImage(f, pm.id) : await loadAudio(f, pm.id);
         if (m.type === 'video') await makeThumb(m);
-        media.set(m.id, m); pendingRelink = pendingRelink.filter(p => p !== pm); relinked++;
+        media.set(m.id, m); storeFile(m); pendingRelink = pendingRelink.filter(p => p !== pm); relinked++;
         continue;
       }
       // stesso file già in libreria: non lo duplico
@@ -3213,6 +3332,7 @@ async function openProjects(){
     <div class="grp"><label class="lab" for="pjName">Progetto aperto</label><input class="tin" id="pjName" value="${esc(P.name || '')}" placeholder="Es. Highlights 1ª giornata" autocomplete="off"></div>
     <div class="grp"><div class="lab">Formato</div>${fmtSeg()}</div>
     ${dbOK ? '' : '<p class="err">Il salvataggio non è disponibile in questo browser (forse una finestra privata).</p>'}
+    <div class="grp"><div class="lab">Sincronizzazione tra dispositivi</div><div class="grp" id="syncBox"></div></div>
     <div class="row"><button class="btn primary" id="pjNew">Nuovo progetto</button></div>
     <div class="plist">${list.map(r => `<div class="pitem${r.id === projectId ? ' cur' : ''}">
       ${r.thumb ? `<img src="${r.thumb}" alt="">` : '<div class="ph"></div>'}
@@ -3224,6 +3344,7 @@ async function openProjects(){
     <div class="row"><button class="btn" id="pjClose">Chiudi</button></div>
   </div>`;
   scrim.hidden = false;
+  syncUI();
   $('#pjClose').onclick = () => { delArmed = null; closeExport(); renderInspector(); };
   $('#pjUpd').onclick = () => { closeExport(); checkUpdate(true); };
   $('#pjName').oninput = e => { P.name = e.target.value; scheduleSave(); };
@@ -3261,7 +3382,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T02:01:52';
+const APP_BUILD = '2026-11-02T02:43:14';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
@@ -3298,6 +3419,7 @@ setTimeout(() => checkUpdate(false, true), 600);
 try { if (localStorage.getItem('moviola:updated')){ localStorage.removeItem('moviola:updated'); setTimeout(() => toast(`Moviola aggiornata · versione ${APP_BUILD.slice(0,16).replace('T',' ')}`, 3000), 900); } } catch(e){}
 
 /* ---------- boot ---------- */
+try { fbInit(); } catch(e){}
 window.addEventListener('resize', () => renderTimeline());
 sizePreview(); renderTimeline(); renderInspector(); updateTime();
 T = 1.6; updateTime(); draw();
