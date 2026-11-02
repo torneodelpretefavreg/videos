@@ -597,7 +597,13 @@ function sizePreview(){
   draw();
 }
 
-function drawFit(g, src, sw, sh, W, H, c){
+function drawRot(g, src, x, y, w, h, rot){
+  if (!rot){ g.drawImage(src, x, y, w, h); return; }
+  g.save(); g.translate(x + w/2, y + h/2); g.rotate(rot*Math.PI/180);
+  const rw = rot % 180 ? h : w, rh = rot % 180 ? w : h;
+  g.drawImage(src, -rw/2, -rh/2, rw, rh); g.restore();
+}
+function drawFit(g, src, sw, sh, W, H, c, rot = 0){
   if (!sw || !sh) return;
   const fit = c.fit || 'cover';
   if (fit === 'contain'){
@@ -605,14 +611,14 @@ function drawFit(g, src, sw, sh, W, H, c){
     const sb = Math.max(W/sw, H/sh) * 1.15;
     g.save();
     if (filterOK && !fastDraw) g.filter = `blur(${Math.round(Math.min(W,H)/28)}px) brightness(0.55)`;
-    g.drawImage(src, (W-sw*sb)/2, (H-sh*sb)/2, sw*sb, sh*sb);
+    drawRot(g, src, (W-sw*sb)/2, (H-sh*sb)/2, sw*sb, sh*sb, rot);
     g.restore();
     if (!filterOK || fastDraw){ g.fillStyle = 'rgba(0,0,0,.6)'; g.fillRect(0,0,W,H); }
   }
   let s = (fit === 'cover' ? Math.max(W/sw, H/sh) : Math.min(W/sw, H/sh)) * (c.zoom || 1);
   const dw = sw*s, dh = sh*s;
   const mx = Math.max(0, (dw-W)/2), my = Math.max(0, (dh-H)/2);
-  g.drawImage(src, (W-dw)/2 - (c.panX||0)*mx, (H-dh)/2 - (c.panY||0)*my, dw, dh);
+  drawRot(g, src, (W-dw)/2 - (c.panX||0)*mx, (H-dh)/2 - (c.panY||0)*my, dw, dh, rot);
 }
 
 const easeOut = p => 1 - Math.pow(1-p, 3);
@@ -733,7 +739,7 @@ function drawText(g, tx, t, W, H){
 }
 
 /* ---------- effetti, filtri e transizioni ---------- */
-let fastDraw = false, renderMode = 'preview';
+let fastDraw = false, renderMode = 'preview', exportLive = null;
 const PREVIEW_SIDE = 720, EXPORT_SIDE = 1920;
 const easeIO = p => p < .5 ? 4*p*p*p : 1 - Math.pow(-2*p + 2, 3)/2;
 function rng(seed){ let a = (seed*2654435761) >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -880,7 +886,8 @@ function drawClipTo(g, W, H, c, lt, live){
     const m = media.get(c.mediaId);
     if (m){
       if (m.type === 'video'){
-        if (live){ if (m.el.readyState >= 2) drawFit(g, m.el, m.w, m.h, W, H, c); }
+        if (live && renderMode === 'export' && exportLive && exportLive.clipId === c.id) drawFit(g, exportLive.frame, exportLive.w, exportLive.h, W, H, c, exportLive.rot);
+        else if (live){ if (m.el.readyState >= 2) drawFit(g, m.el, m.w, m.h, W, H, c); }
         else { const f = frozenFrame(c.mediaId, lt <= 0 ? c.in : Math.max(c.in, c.out - 0.04)); if (f) drawFit(g, f, f.width, f.height, W, H, c); }
       } else drawFit(g, m.el, m.w, m.h, W, H, c);
     }
@@ -2463,6 +2470,194 @@ function seekTo(el, time){
     el.currentTime = time;
   });
 }
+/* ---------- lettore video MP4/MOV con decodifica hardware (export veloce, funziona anche a finestra nascosta) ---------- */
+const MP4V = {
+  hex: n => n.toString(16).padStart(2, '0'),
+  // stringa codec HEVC dal box hvcC (come fanno i lettori standard)
+  hevcCodec(dv, p, type){
+    const b1 = dv.getUint8(p + 1), space = b1 >> 6, tier = (b1 >> 5) & 1, prof = b1 & 31;
+    let compat = dv.getUint32(p + 2), rev = 0; for (let i = 0; i < 32; i++){ rev = (rev << 1) | (compat & 1); compat >>>= 1; } rev >>>= 0;
+    const cons = []; for (let i = 0; i < 6; i++) cons.push(dv.getUint8(p + 6 + i));
+    while (cons.length && cons[cons.length - 1] === 0) cons.pop();
+    const level = dv.getUint8(p + 12);
+    return `${type}.${['', 'A', 'B', 'C'][space]}${prof}.${rev.toString(16)}.${tier ? 'H' : 'L'}${level}${cons.length ? '.' + cons.map(x => x.toString(16)).join('.') : ''}`;
+  },
+  async index(file){
+    let pos = 0, moov = null;
+    while (pos + 8 <= file.size){
+      const hv = new DataView(await file.slice(pos, pos + 16).arrayBuffer());
+      let sz = hv.getUint32(0); const t = MP4A.str(hv, 4);
+      if (sz === 1) sz = Number(hv.getBigUint64(8)); else if (sz === 0) sz = file.size - pos;
+      if (sz < 8) break;
+      if (t === 'moov'){ moov = new DataView(await file.slice(pos, pos + sz).arrayBuffer()); break; }
+      pos += sz;
+    }
+    if (!moov) return null;
+    for (const trak of MP4A.boxes(moov, 8, moov.byteLength)){
+      if (trak.t !== 'trak') continue;
+      const mdia = MP4A.child(moov, trak, 'mdia'); if (!mdia) continue;
+      const hdlr = MP4A.child(moov, mdia, 'hdlr');
+      if (!hdlr || MP4A.str(moov, hdlr.s + 8) !== 'vide') continue;
+      // rotazione dalla matrice del tkhd
+      const tkhd = MP4A.child(moov, trak, 'tkhd'), tv = moov.getUint8(tkhd.s);
+      const mo = tkhd.s + (tv === 1 ? 52 : 40);
+      const a = moov.getInt32(mo) / 65536, b = moov.getInt32(mo + 4) / 65536;
+      const rot = ((Math.round(Math.atan2(b, a) * 180 / Math.PI / 90) * 90) % 360 + 360) % 360;
+      const mdhd = MP4A.child(moov, mdia, 'mdhd'), mv = moov.getUint8(mdhd.s);
+      const timescale = mv === 1 ? moov.getUint32(mdhd.s + 20) : moov.getUint32(mdhd.s + 12);
+      // edit list: spostamento iniziale (tipico dei video con B-frame)
+      let shift = 0;
+      const elst = MP4A.path(moov, trak, 'edts', 'elst');
+      if (elst){
+        const ev = moov.getUint8(elst.s), n = moov.getUint32(elst.s + 4);
+        let mvhdScale = 1000; const mvhd = MP4A.child(moov, { s:8, e:moov.byteLength }, 'mvhd');
+        if (mvhd) mvhdScale = moov.getUint8(mvhd.s) === 1 ? moov.getUint32(mvhd.s + 20) : moov.getUint32(mvhd.s + 12);
+        let empty = 0;
+        for (let i = 0; i < n; i++){
+          const q = elst.s + 8 + i * (ev === 1 ? 20 : 12);
+          const segDur = ev === 1 ? Number(moov.getBigUint64(q)) : moov.getUint32(q);
+          const mt = ev === 1 ? Number(moov.getBigInt64(q + 8)) : moov.getInt32(q + 4);
+          if (mt === -1){ empty += segDur / mvhdScale; continue; }
+          shift = mt / timescale - empty; break;
+        }
+      }
+      const stbl = MP4A.path(moov, mdia, 'minf', 'stbl');
+      const stsd = MP4A.child(moov, stbl, 'stsd');
+      const ent = stsd.s + 8, type = MP4A.str(moov, ent + 4), entEnd = ent + moov.getUint32(ent);
+      const width = moov.getUint16(ent + 32), height = moov.getUint16(ent + 34);
+      let codec = null, description;
+      for (const bx of MP4A.boxes(moov, ent + 86, entEnd)){
+        if (bx.t === 'avcC'){ codec = `${type === 'avc3' ? 'avc3' : 'avc1'}.${MP4V.hex(moov.getUint8(bx.s + 1))}${MP4V.hex(moov.getUint8(bx.s + 2))}${MP4V.hex(moov.getUint8(bx.s + 3))}`; description = new Uint8Array(moov.buffer, moov.byteOffset + bx.s, bx.e - bx.s).slice(); }
+        else if (bx.t === 'hvcC'){ codec = MP4V.hevcCodec(moov, bx.s, type === 'hev1' ? 'hev1' : 'hvc1'); description = new Uint8Array(moov.buffer, moov.byteOffset + bx.s, bx.e - bx.s).slice(); }
+        else if (bx.t === 'vpcC'){ const p = bx.s + 4; codec = `vp09.${MP4V.hex(moov.getUint8(p))}.${MP4V.hex(moov.getUint8(p + 1))}.${MP4V.hex(moov.getUint8(p + 2) >> 4)}`; }
+        else if (bx.t === 'av1C'){ const p = bx.s; const b1 = moov.getUint8(p + 1), b2 = moov.getUint8(p + 2); const prof = b1 >> 5, lvl = b1 & 31, tierH = b2 >> 7, hb = (b2 >> 6) & 1, tw = (b2 >> 5) & 1; const bd = prof === 2 && hb ? (tw ? 12 : 10) : hb ? 10 : 8; codec = `av01.${prof}.${String(lvl).padStart(2, '0')}${tierH ? 'H' : 'M'}.${String(bd).padStart(2, '0')}`; description = new Uint8Array(moov.buffer, moov.byteOffset + p, bx.e - p).slice(); }
+      }
+      if (!codec) return null;
+      const stsz = MP4A.child(moov, stbl, 'stsz'), sizes = [];
+      { const fixed = moov.getUint32(stsz.s + 4), n = moov.getUint32(stsz.s + 8); for (let i = 0; i < n; i++) sizes.push(fixed || moov.getUint32(stsz.s + 12 + i * 4)); }
+      const stsc = MP4A.child(moov, stbl, 'stsc'), sc = [];
+      for (let i = 0, n = moov.getUint32(stsc.s + 4); i < n; i++){ const q = stsc.s + 8 + i * 12; sc.push([moov.getUint32(q), moov.getUint32(q + 4)]); }
+      const stco = MP4A.child(moov, stbl, 'stco'), co64 = MP4A.child(moov, stbl, 'co64'), chunks = [];
+      if (stco) for (let i = 0, n = moov.getUint32(stco.s + 4); i < n; i++) chunks.push(moov.getUint32(stco.s + 8 + i * 4));
+      else for (let i = 0, n = moov.getUint32(co64.s + 4); i < n; i++) chunks.push(Number(moov.getBigUint64(co64.s + 8 + i * 8)));
+      const N = sizes.length, offs = new Float64Array(N), dts = new Float64Array(N + 1), cts = new Float64Array(N), sync = new Uint8Array(N);
+      let si = 0;
+      for (let ci = 0; ci < chunks.length && si < N; ci++){
+        let e = 0; while (e + 1 < sc.length && sc[e + 1][0] <= ci + 1) e++;
+        let o = chunks[ci];
+        for (let k = 0; k < sc[e][1] && si < N; k++){ offs[si] = o; o += sizes[si]; si++; }
+      }
+      const stts = MP4A.child(moov, stbl, 'stts');
+      { let t = 0, k = 0; for (let i = 0, n = moov.getUint32(stts.s + 4); i < n; i++){ const q = stts.s + 8 + i * 8, c = moov.getUint32(q), d = moov.getUint32(q + 4); for (let j = 0; j < c && k < N; j++){ dts[k++] = t; t += d; } } dts[N] = k ? dts[k - 1] + (k > 1 ? dts[k - 1] - dts[k - 2] : 1) : 0; }
+      const ctts = MP4A.child(moov, stbl, 'ctts');
+      if (ctts){ const cv = moov.getUint8(ctts.s); let k = 0; for (let i = 0, n = moov.getUint32(ctts.s + 4); i < n; i++){ const q = ctts.s + 8 + i * 8, c = moov.getUint32(q), o = cv === 1 ? moov.getInt32(q + 4) : moov.getUint32(q + 4); for (let j = 0; j < c && k < N; j++) cts[k++] = o; } }
+      const stss = MP4A.child(moov, stbl, 'stss');
+      if (stss){ for (let i = 0, n = moov.getUint32(stss.s + 4); i < n; i++){ const s = moov.getUint32(stss.s + 8 + i * 4) - 1; if (s < N) sync[s] = 1; } } else sync.fill(1);
+      // tempo di presentazione in secondi, già corretto dall'edit list
+      const pts = new Float64Array(N); for (let i = 0; i < N; i++) pts[i] = (dts[i] + cts[i]) / timescale - shift;
+      const fdur = N > 1 ? (dts[N - 1] - dts[0]) / timescale / (N - 1) : 1 / 30;
+      return { codec, description, width, height, rot, count:N, sizes, offs, pts, sync, fdur };
+    }
+    return null;
+  }
+};
+// decoder di una clip: chiedi i fotogrammi in ordine di tempo, restituisce il VideoFrame da mostrare
+class ClipDecoder {
+  constructor(file, idx){ this.file = file; this.idx = idx; this.out = []; this.cur = null; this.next = 0; this.err = null; this.eof = false; this.waiter = null; this.block = null; }
+  static async supported(idx){
+    for (const hw of ['prefer-hardware', 'no-preference']){
+      try { const cfg = { codec:idx.codec, codedWidth:idx.width, codedHeight:idx.height, hardwareAcceleration:hw }; if (idx.description) cfg.description = idx.description; if ((await VideoDecoder.isConfigSupported(cfg)).supported) return cfg; } catch(e){}
+    }
+    return null;
+  }
+  async open(cfg, t){
+    this.dec = new VideoDecoder({ output:f => { this.out.push(f); this.wake(); }, error:e => { this.err = e; this.wake(); } });
+    this.dec.configure(cfg);
+    // parte dall'ultimo fotogramma chiave prima di t
+    const { pts, sync, count } = this.idx;
+    let k = 0;
+    for (let i = 0; i < count; i++) if (sync[i] && pts[i] <= t + 1e-4) k = i;
+    this.next = k;
+  }
+  wake(){ const w = this.waiter; this.waiter = null; if (w) w(); }
+  async data(i){
+    const { offs, sizes } = this.idx, o = offs[i], s = sizes[i];
+    if (!this.block || o < this.block.o || o + s > this.block.o + this.block.d.byteLength){
+      const len = Math.min(this.file.size - o, Math.max(s, 4 * 1048576));
+      this.block = { o, d:new Uint8Array(await this.file.slice(o, o + len).arrayBuffer()) };
+    }
+    return this.block.d.subarray(o - this.block.o, o - this.block.o + s);
+  }
+  async feed(n){
+    const { count, pts, sync } = this.idx;
+    for (let j = 0; j < n && this.next < count; j++, this.next++){
+      const i = this.next;
+      this.dec.decode(new EncodedVideoChunk({ type:sync[i] ? 'key' : 'delta', timestamp:Math.round(pts[i] * 1e6), data:await this.data(i) }));
+    }
+    if (this.next >= count && !this.eof){ this.eof = true; this.dec.flush().then(() => { this.flushed = true; this.wake(); }, e => { this.err = this.err || e; this.wake(); }); }
+  }
+  // fotogramma da mostrare al tempo t (secondi, tempo del file)
+  async frameAt(t){
+    const eps = this.idx.fdur * 0.5;
+    for (;;){
+      if (this.err) throw this.err;
+      // scarta i fotogrammi superati
+      while (this.out.length && this.out[0].timestamp / 1e6 <= t + eps){ if (this.cur) this.cur.close(); this.cur = this.out.shift(); }
+      if (this.out.length || this.flushed) return this.cur;
+      if (!this.eof && this.dec.decodeQueueSize < 8) await this.feed(6);
+      else await new Promise(r => { this.waiter = r; });
+    }
+  }
+  close(){ try { this.dec && this.dec.state !== 'closed' && this.dec.close(); } catch(e){} if (this.cur) this.cur.close(); this.out.forEach(f => f.close()); this.out = []; this.cur = null; }
+}
+
+// informazioni di decodifica per ogni file (null = non MP4 o codec non supportato: si usa il metodo vecchio)
+const vInfoCache = new Map();
+async function vInfo(m){
+  if (!vInfoCache.has(m.id)){
+    let v = null;
+    try { if ('VideoDecoder' in window){ const idx = await MP4V.index(m.file); if (idx){ const cfg = await ClipDecoder.supported(idx); if (cfg) v = { idx, cfg }; } } } catch(e){ v = null; }
+    vInfoCache.set(m.id, v);
+  }
+  return vInfoCache.get(m.id);
+}
+let liveDec = null, liveDecClip = null, liveDecT = -1;
+async function liveFrameFor(c, srcT){
+  const m = media.get(c.mediaId); const info = m && await vInfo(m); if (!info) return null;
+  if (liveDecClip !== c || srcT < liveDecT - 1e-3){
+    if (liveDec) liveDec.close();
+    liveDec = new ClipDecoder(m.file, info.idx); await liveDec.open(info.cfg, srcT); liveDecClip = c;
+  }
+  liveDecT = srcT;
+  const fr = await liveDec.frameAt(srcT);
+  if (!fr) return null;
+  const rot = info.idx.rot;
+  return { frame:fr, rot, w:rot % 180 ? fr.displayHeight : fr.displayWidth, h:rot % 180 ? fr.displayWidth : fr.displayHeight };
+}
+function closeLiveDec(){ if (liveDec) liveDec.close(); liveDec = null; liveDecClip = null; liveDecT = -1; }
+// fotogramma fermo per le transizioni, letto dal decodificatore (già ruotato)
+async function decodedStill(mediaId, t){
+  const m = media.get(mediaId), info = m && await vInfo(m); if (!info) return null;
+  const d = new ClipDecoder(m.file, info.idx);
+  try {
+    await d.open(info.cfg, t); const fr = await d.frameAt(t); if (!fr) return null;
+    const rot = info.idx.rot, w = rot % 180 ? fr.displayHeight : fr.displayWidth, h = rot % 180 ? fr.displayWidth : fr.displayHeight;
+    const k = Math.min(1, EXPORT_SIDE / Math.max(w, h));
+    const cv2 = document.createElement('canvas'); cv2.width = Math.round(w*k); cv2.height = Math.round(h*k);
+    drawRot(cv2.getContext('2d'), fr, 0, 0, cv2.width, cv2.height, rot);
+    return cv2;
+  } catch(e){ return null; } finally { d.close(); }
+}
+async function prepareFrozen(t){
+  const tr = transitionAt(t);
+  if (tr && tr.frozen && tr.frozen.c.kind === 'video'){
+    const f = tr.frozen, key = frameKey(f.c.mediaId, f.srcT, EXPORT_SIDE);
+    if (!exportFrames.has(key)){
+      if (exportFrames.size >= 2) exportFrames.clear();
+      exportFrames.set(key, (await decodedStill(f.c.mediaId, f.srcT)) || await queueGrab(f.c.mediaId, f.srcT, EXPORT_SIDE, true));
+    }
+  }
+}
 async function prepareFrame(t){
   const o = clipAt(t);
   if (o && o.c.kind === 'video'){ const m = media.get(o.c.mediaId); if (m) await seekTo(m.el, o.c.in + (t - o.start)*spd(o.c)); }
@@ -2643,11 +2838,30 @@ async function exportVideo(opt, onProg, signal){
       el.play().catch(finish);
     });
   });
+  // attesa del codificatore senza timer (i timer vengono rallentati se la finestra è nascosta)
+  const waitEnc = async max => { while (ve.encodeQueueSize > max){ await new Promise(r => { if ('ondequeue' in ve) ve.addEventListener('dequeue', r, { once:true }); else setTimeout(r, 3); }); } };
   let i = 0;
+  try {
   while (i < n){
     if (signal.aborted){ try { ve.close(); } catch(e){} throw new DOMException('abort','AbortError'); }
     if (encErr) throw encErr;
     const t = tAt(i), o = clipAt(t);
+    // percorso principale: fotogrammi letti dal file e decodificati dal chip video
+    if (o && o.c.kind === 'video'){
+      const srcT = Math.min(o.c.in + (t - o.start)*spd(o.c), o.c.out - 1e-3);
+      let lf = null;
+      try { lf = await liveFrameFor(o.c, srcT); } catch(e){ closeLiveDec(); vInfoCache.set(o.c.mediaId, null); lf = null; }
+      if (lf){
+        exportLive = { clipId:o.c.id, ...lf };
+        await prepareFrozen(t);
+        render(g, W, H, t, 'export');
+        exportLive = null;
+        encodeAt(i);
+        await waitEnc(8);
+        i++;
+        continue;
+      }
+    }
     if (canPlayCapture && o && o.c.kind === 'video' && !slowClips.has(o.c.id) && !transitionAt(t)){
       let j = i + 1;
       while (j < n){ const tj = tAt(j), oj = clipAt(tj); if (!oj || oj.c !== o.c || transitionAt(tj)) break; j++; }
@@ -2661,9 +2875,10 @@ async function exportVideo(opt, onProg, signal){
     await prepareFrame(t);
     render(g, W, H, t, 'export');
     encodeAt(i);
-    while (ve.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 3));
+    await waitEnc(8);
     i++;
   }
+  } finally { closeLiveDec(); exportLive = null; }
   if (signal.aborted){ try { ve.close(); } catch(e){} throw new DOMException('abort','AbortError'); }
   await ve.flush(); ve.close();
   if (encErr) throw encErr;
@@ -2845,7 +3060,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T00:30:36';
+const APP_BUILD = '2026-11-02T01:04:43';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
