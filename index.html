@@ -612,7 +612,8 @@ const b64ToBytes = s => { const bin = atob(s || ''); const u = new Uint8Array(bi
 function cloudQueue(fn){ const p = cloudChain.then(fn).catch(e => { fbErr = fbMsg(e); syncUI(); }); cloudChain = p; return p; }
 /* ---------- Google Drive: i file vanno nella cartella "Moviola" del tuo Drive ---------- */
 let gClientId = '', gToken = null, gTokenExp = 0, gTokenClient = null, driveFolder = null, driveQuota = null, gisLoaded = false, driveErr = '';
-try { gClientId = localStorage.getItem('moviola:gclient') || ''; const t = JSON.parse(sessionStorage.getItem('moviola:gtok') || 'null'); if (t && t.exp > Date.now() + 60000){ gToken = t.tok; gTokenExp = t.exp; } } catch(e){}
+const DEFAULT_GCLIENT = '450862351417-ep7rjftrp591q2t258nn0f94jo8h3o8o.apps.googleusercontent.com';
+try { gClientId = localStorage.getItem('moviola:gclient') || DEFAULT_GCLIENT; const t = JSON.parse(sessionStorage.getItem('moviola:gtok') || 'null'); if (t && t.exp > Date.now() + 60000){ gToken = t.tok; gTokenExp = t.exp; } } catch(e){}
 const driveOn = () => !!gClientId;
 const driveReady = () => !!gToken && gTokenExp > Date.now() + 60000;
 function loadGis(){
@@ -853,7 +854,7 @@ function syncUI(){
   const gc = document.getElementById('gConnect');
   if (gc) gc.onclick = () => { driveConnect().then(() => toast('Google Drive collegato')).catch(() => {}); };
   const gr = document.getElementById('gcidReset');
-  if (gr) gr.onclick = () => { setClientId(''); gToken = null; syncUI(); };
+  if (gr) gr.onclick = () => { setClientId(''); try { localStorage.setItem('moviola:gclient', ''); } catch(e){} gToken = null; syncUI(); };
   const cc = document.getElementById('cloudClean');
   if (cc) cc.onclick = async () => {
     cc.disabled = true; const ids = await cloudUnused();
@@ -3668,7 +3669,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T15:45:21';
+const APP_BUILD = '2026-11-02T20:27:08';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
