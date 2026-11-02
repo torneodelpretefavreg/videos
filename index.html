@@ -387,6 +387,8 @@ const exampleProject = () => ({
 });
 let P = exampleProject();
 let sel = null;        // {type:'clip'|'text'|'audio'|'logo', id}
+let multi = [];        // selezione multipla (⌘/Ctrl + clic): [{type,id}]
+const inMulti = (type, id) => multi.some(x => x.type === type && x.id === id);
 // porta i progetti vecchi (una sola "music") al nuovo formato con libreria e più brani audio
 function normalize(p){
   if (!p.audios) p.audios = [];
@@ -891,11 +893,14 @@ function drawClipTo(g, W, H, c, lt, live){
   } else {
     const m = media.get(c.mediaId);
     if (m){
+      // rotazione scelta dall'utente (0/90/180/270), sommata a quella del file
+      const ur = ((c.rot || 0) % 360 + 360) % 360;
+      const fitR = (src, w, h, r) => { const t = (r + ur) % 360; drawFit(g, src, ur % 180 ? h : w, ur % 180 ? w : h, W, H, c, t); };
       if (m.type === 'video'){
-        if (live && renderMode === 'export' && exportLive && exportLive.clipId === c.id) drawFit(g, exportLive.frame, exportLive.w, exportLive.h, W, H, c, exportLive.rot);
-        else if (live){ if (m.el.readyState >= 2) drawFit(g, m.el, m.w, m.h, W, H, c); }
-        else { const f = frozenFrame(c.mediaId, lt <= 0 ? c.in : Math.max(c.in, c.out - 0.04)); if (f) drawFit(g, f, f.width, f.height, W, H, c); }
-      } else drawFit(g, m.el, m.w, m.h, W, H, c);
+        if (live && renderMode === 'export' && exportLive && exportLive.clipId === c.id) fitR(exportLive.frame, exportLive.w, exportLive.h, exportLive.rot);
+        else if (live){ if (m.el.readyState >= 2) fitR(m.el, m.w, m.h, 0); }
+        else { const f = frozenFrame(c.mediaId, lt <= 0 ? c.in : Math.max(c.in, c.out - 0.04)); if (f) fitR(f, f.width, f.height, 0); }
+      } else fitR(m.el, m.w, m.h, 0);
     }
   }
   g.restore();
@@ -1058,7 +1063,7 @@ async function makeThumb(m){
 const isAudio = f => f.type.startsWith('audio/') || /\.(mp3|m4a|wav|aac|ogg|flac)$/i.test(f.name);
 const isImage = f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|gif)$/i.test(f.name);
 
-async function importFiles(files){
+async function importFiles(files, quiet){
   if (!files.length) return;
   pause();
   let added = 0, failed = [], relinked = 0; const newIds = [];
@@ -1090,9 +1095,10 @@ async function importFiles(files){
   if (failed.length) toast(`Non riesco a leggere: ${failed.join(', ')}. Prova a convertirlo in MP4 (H.264).`, 5000);
   else $('#toast').hidden = true;
   if (newIds.length){
-    libNew = new Set(newIds); setLibOpen(true);
-    toast(newIds.length === 1 ? 'Aggiunto alla libreria: trascinalo sulla timeline o toccalo' : `${newIds.length} elementi in libreria`, 3000);
+    libNew = new Set(newIds); renderLibrary();
+    if (!quiet){ setLibOpen(true); toast(newIds.length === 1 ? 'Aggiunto alla libreria: trascinalo sulla timeline o toccalo' : `${newIds.length} elementi in libreria`, 3000); }
   }
+  return newIds;
 }
 
 /* ---------- playback ---------- */
@@ -1221,7 +1227,7 @@ function renderTimeline(){
   // clips
   let v = '';
   for (const o of layout()){
-    const c = o.c, isSel = sel && sel.type === 'clip' && sel.id === c.id;
+    const c = o.c, isSel = (sel && sel.type === 'clip' && sel.id === c.id) || inMulti('clip', c.id);
     const m = c.mediaId ? media.get(c.mediaId) : null;
     let bg = c.kind === 'card' ? `background:${c.color}` : (m && m.thumb ? `background-image:url('${m.thumb}')` : '');
     const name = c.kind === 'card' ? 'Cartello' : (c.name || 'Clip');
@@ -1261,7 +1267,7 @@ function renderTimeline(){
   inner.style.height = (topA + nA*(AH+GAP) + 4) + 'px';
   let tx = '';
   for (const x of P.texts){
-    const isSel = sel && sel.type === 'text' && sel.id === x.id;
+    const isSel = (sel && sel.type === 'text' && sel.id === x.id) || inMulti('text', x.id);
     tx += `<div class="bar text${isSel?' sel':''}" data-text="${x.id}" style="top:${rowOf.get(x.id)*(RH+GAP)}px;bottom:auto;height:${RH}px;left:${xOf(x.start)}px;width:${Math.max(6,(x.end-x.start)*pps-2)}px">${esc(x.text.split('\n')[0])}<div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
   if (!P.texts.length) tx = `<div class="lane-empty" style="left:${X0}px">Testi</div>`;
@@ -1269,7 +1275,7 @@ function renderTimeline(){
   // audio
   let a = '';
   for (const au of P.audios){
-    const isSel = sel && sel.type === 'audio' && sel.id === au.id;
+    const isSel = (sel && sel.type === 'audio' && sel.id === au.id) || inMulti('audio', au.id);
     const segs = (au.vsegs || []).map(sg => `<i class="vseg" style="left:${sg.a*pps}px;width:${Math.max(2,(sg.b-sg.a)*pps)}px;--v:${Math.min(1, sg.v)}"></i>`).join('');
     const fades = (au.fadeIn ? `<i class="afade in" style="width:${au.fadeIn*pps}px"></i>` : '') + (au.fadeOut ? `<i class="afade out" style="width:${au.fadeOut*pps}px"></i>` : '');
     a += `<div class="bar audio${isSel?' sel':''}" data-audio="${au.id}" style="top:${arowOf.get(au.id)*(AH+GAP)}px;bottom:auto;height:${AH}px;left:${xOf(au.start)}px;width:${Math.max(6,audLen(au)*pps-2)}px">${segs}${fades}<span class="bname">♪ ${esc(au.name || 'Audio')}</span><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
@@ -1290,30 +1296,31 @@ inner.addEventListener('pointerdown', e => {
     pause(); drag = { kind:'scrub' }; inner.setPointerCapture(e.pointerId);
     scrubTo(e); e.preventDefault(); return;
   }
-  if (h && clipEl && clipEl.classList.contains('sel')){
+  if (h && clipEl && clipEl.classList.contains('sel') && !multi.length){
     const c = P.clips.find(c => c.id === clipEl.dataset.clip);
     pause();
     drag = { kind:'trim', side:h.dataset.h, c, x0:e.clientX, in0:c.in, out0:c.out, dur0:c.dur, snap:false };
     inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
-  if (clipEl && !h && (clipEl.classList.contains('sel') || e.pointerType === 'mouse')){
+  if (clipEl && !h && !(e.metaKey || e.ctrlKey || e.shiftKey) && (clipEl.classList.contains('sel') || e.pointerType === 'mouse')){
     const c = P.clips.find(c => c.id === clipEl.dataset.clip);
     drag = { kind:'clipmove', c, x0:e.clientX, y0:e.clientY, moving:false };
     inner.setPointerCapture(e.pointerId);
     if (clipEl.classList.contains('sel')) e.preventDefault();
     return;
   }
-  if (textEl && textEl.classList.contains('sel')){
+  if (textEl && textEl.classList.contains('sel') && !multi.length && !(e.metaKey || e.ctrlKey || e.shiftKey)){
     const x = P.texts.find(t => t.id === textEl.dataset.text);
     drag = { kind:'text', side:h ? h.dataset.h : 'm', x, x0:e.clientX, s0:x.start, e0:x.end, snap:false, moved:false, T0:T };
     inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
-  if (audEl && audEl.classList.contains('sel')){
+  if (audEl && audEl.classList.contains('sel') && !multi.length && !(e.metaKey || e.ctrlKey || e.shiftKey)){
     const a = P.audios.find(x => x.id === audEl.dataset.audio);
     pause();
     drag = { kind:'audio', side:h ? h.dataset.h : 'm', a, x0:e.clientX, s0:a.start, o0:a.offset, l0:audLen(a), snap:false, T0:T };
     inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
+  if ((e.metaKey || e.ctrlKey || e.shiftKey) && (clipEl || textEl || audEl)){ drag = { kind:'tap', x0:e.clientX, y0:e.clientY, clipEl, textEl, audEl, clientX:e.clientX }; return; }
   drag = { kind:'tap', x0:e.clientX, y0:e.clientY, clipEl, textEl, audEl, clientX:e.clientX };
 });
 inner.addEventListener('pointermove', e => {
@@ -1390,10 +1397,18 @@ function endDrag(e){
   if (d.kind === 'tap' && e.type === 'pointerup' && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 8){
     const rect = inner.getBoundingClientRect();
     const t = tOf(e.clientX - rect.left);
-    if (d.clipEl) select({ type:'clip', id:d.clipEl.dataset.clip });
-    else if (d.textEl) select({ type:'text', id:d.textEl.dataset.text });
-    else if (d.audEl) select({ type:'audio', id:d.audEl.dataset.audio });
-    else select(null);
+    const hit = d.clipEl ? { type:'clip', id:d.clipEl.dataset.clip } : d.textEl ? { type:'text', id:d.textEl.dataset.text } : d.audEl ? { type:'audio', id:d.audEl.dataset.audio } : null;
+    if (hit && (e.metaKey || e.ctrlKey || e.shiftKey)){
+      // ⌘/Ctrl + clic: aggiunge o toglie dalla selezione
+      if (!multi.length && sel && sel.type !== 'logo') multi = [{ ...sel }];
+      multi = inMulti(hit.type, hit.id) ? multi.filter(x => !(x.type === hit.type && x.id === hit.id)) : [...multi, hit];
+      sel = multi.length === 1 ? { ...multi[0] } : null;
+      if (multi.length <= 1) multi = [];
+      renderTimeline(); renderInspector();
+      return;
+    }
+    multi = [];
+    select(hit);
     setT(t);
   } else if (d.kind === 'clipmove'){
     document.body.classList.remove('clipdrag');
@@ -1432,7 +1447,7 @@ scroller.addEventListener('touchstart', e => {
 scroller.addEventListener('touchmove', e => {
   if (!pinch || e.touches.length !== 2) return;
   e.preventDefault();
-  pps = clamp(pinch.pps0 * tDist(e) / pinch.d0, ppsMin(), PPS_MAX);
+  pps = clamp(pinch.pps0 * Math.pow(tDist(e) / pinch.d0, 2.2), ppsMin(), PPS_MAX);
   renderTimeline();
   scroller.scrollLeft = xOf(pinch.tAt) - pinch.mx;
 }, { passive:false });
@@ -1445,12 +1460,17 @@ function zoomAround(newPps, clientX){
   scroller.scrollLeft = xOf(tAt) - mx;
 }
 $('.tl-wrap').addEventListener('wheel', e => {
-  if (e.ctrlKey || e.metaKey || e.altKey){ e.preventDefault(); zoomAround(pps * Math.exp(-clamp(e.deltaY, -30, 30) * 0.012), e.clientX); }
+  if (e.ctrlKey || e.metaKey || e.altKey){
+    e.preventDefault();
+    // pizzico sul trackpad (delta piccoli) molto sensibile; rotella del mouse a scatti più ampi
+    const k = Math.abs(e.deltaY) < 20 ? 0.045 : 0.02;
+    zoomAround(pps * Math.exp(-clamp(e.deltaY, -60, 60) * k), e.clientX);
+  }
   else if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.shiftKey && e.target.closest('.tl-scroll')){ e.preventDefault(); scroller.scrollLeft += e.deltaY; }
 }, { passive:false });
 let gest = null;
 $('.tl-wrap').addEventListener('gesturestart', e => { e.preventDefault(); gest = { pps0:pps, x:e.clientX }; });
-$('.tl-wrap').addEventListener('gesturechange', e => { if (!gest) return; e.preventDefault(); zoomAround(gest.pps0 * e.scale, gest.x); });
+$('.tl-wrap').addEventListener('gesturechange', e => { if (!gest) return; e.preventDefault(); zoomAround(gest.pps0 * Math.pow(e.scale, 2.5), gest.x); });
 $('.tl-wrap').addEventListener('gestureend', e => { gest = null; });
 // impedisce lo zoom della pagina col pizzico fuori dalla timeline
 document.addEventListener('gesturestart', e => e.preventDefault());
@@ -1517,7 +1537,7 @@ function edit(fn, opts = {}){
   if (opts.seek) seekPreview(); else requestDraw();
   if (opts.rebuild) renderInspector();
 }
-function select(s){ sel = s; renderTimeline(); renderInspector(); }
+function select(s){ sel = s; if (s) multi = []; renderTimeline(); renderInspector(); }
 
 function seg(id, opts, val){ return `<div class="seg" data-seg="${id}" role="group">${opts.map(([v,l]) => `<button type="button" data-v="${v}" aria-pressed="${String(v)===String(val)}">${l}</button>`).join('')}</div>`; }
 function range(id, label, min, max, step, val, fmt){ return `<div class="grp"><label class="lab" for="${id}">${label}<output id="${id}_o">${fmt(val)}</output></label><input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${val}"></div>`; }
@@ -1539,6 +1559,17 @@ function segUI(item, startT){
   </div>`;
 }
 function renderInspector(){
+  if (multi.length > 1){
+    const n = { clip:0, text:0, audio:0 }; multi.forEach(x => n[x.type]++);
+    const parts = [n.clip && `${n.clip} clip`, n.text && `${n.text} ${n.text === 1 ? 'testo' : 'testi'}`, n.audio && `${n.audio} audio`].filter(Boolean).join(' · ');
+    insp.innerHTML = `<h2>Selezione <small>${multi.length} elementi</small><button type="button" class="btn only-m" data-act="done">Fatto</button></h2>
+      <p class="note">${parts}. ⌘/Ctrl + clic per aggiungere o togliere elementi.</p>
+      <div class="row"><button class="btn" data-act="mcopy">Copia (⌘C)</button><button class="btn" data-act="mdup">Duplica qui</button></div>
+      ${n.clip ? `<div class="grp"><div class="lab">Transizione sulle clip scelte</div>${seg('mtr',TRANS,'')}</div><div class="grp"><div class="lab">Filtro sulle clip scelte</div>${seg('mlook',LOOKS,'')}</div>` : ''}
+      <div class="row"><button class="btn danger" data-act="mdel">Elimina ${multi.length} elementi</button></div>`;
+    document.body.classList.add('has-sel');
+    return;
+  }
   const o = findSel();
   let h = '';
   if (!o){
@@ -1548,7 +1579,7 @@ function renderInspector(){
       <div class="grp"><label class="lab" for="pname">Nome</label><input class="tin" id="pname" value="${esc(P.name || '')}" placeholder="Es. Highlights 1ª giornata" autocomplete="off"></div>
       <div class="stats"><div class="stat"><b>${P.clips.length}</b><span>clip</span></div><div class="stat"><b>${P.texts.length}</b><span>testi</span></div><div class="stat"><b>${fmtT(tot).replace(/\.\d+$/,'')}</b><span>durata</span></div></div>
       <p class="note">Tocca una clip o un testo nella timeline per modificarlo. Trascina le maniglie gialle per tagliare, oppure porta la linea rossa dove vuoi e usa <b>Dividi</b>.</p>
-      <p class="note">Da tastiera: <span class="kbd">Spazio</span> riproduci, <span class="kbd">S</span> dividi, <span class="kbd">Canc</span> elimina, <span class="kbd">Ctrl Z</span> annulla.</p>`;
+      <p class="note">Da tastiera: <span class="kbd">Spazio</span> riproduci, <span class="kbd">S</span> dividi, <span class="kbd">Canc</span> elimina, <span class="kbd">⌘Z</span> annulla, <span class="kbd">⌘ + clic</span> selezione multipla, <span class="kbd">⌘C</span> <span class="kbd">⌘X</span> <span class="kbd">⌘V</span> copia, taglia, incolla, <span class="kbd">⌘A</span> seleziona tutto, <span class="kbd">⌘D</span> duplica.</p>`;
   } else if (sel.type === 'clip'){
     const c = o, m = media.get(c.mediaId);
     const idx = P.clips.indexOf(c);
@@ -1570,7 +1601,8 @@ function renderInspector(){
     if (c.kind === 'video') h += `<div class="row"><button class="btn" data-act="freeze">Fermo immagine qui</button></div>`;
     if (c.kind === 'card') h += `<div class="grp"><div class="lab">Colore</div>${swatches('ccol', c.color)}</div>`;
     if (c.kind !== 'card'){
-      h += `<div class="grp"><div class="lab">Inquadratura</div>${seg('fit',[['cover','Riempi'],['contain','Adatta']],c.fit)}</div>
+      h += `<div class="grp"><div class="lab">Ruota</div>${seg('crot',[[0,'0°'],[90,'90° ↻'],[180,'180°'],[270,'90° ↺']],c.rot || 0)}</div>
+        <div class="grp"><div class="lab">Inquadratura</div>${seg('fit',[['cover','Riempi'],['contain','Adatta']],c.fit)}</div>
         ${range('czoom','Zoom',1,3,0.01,c.zoom,v=>(+v).toFixed(2)+'×')}
         ${range('cpx','Orizzontale',-1,1,0.01,c.panX,v=>Math.round(v*100))}
         ${range('cpy','Verticale',-1,1,0.01,c.panY,v=>Math.round(v*100))}`;
@@ -1690,11 +1722,24 @@ insp.addEventListener('click', e => {
     if (key !== 'cspd' && v !== 'none'){ setTimeout(() => { if (!playing) play(); }, 60); }
     return;
   }
-  if (e.target.closest('[data-act="done"]')){ select(null); return; }
+  if (e.target.closest('[data-act="done"]')){ multi = []; select(null); return; }
+  if (multi.length > 1){
+    const act = e.target.closest('[data-act]')?.dataset.act, sb = e.target.closest('[data-seg] button');
+    if (sb){
+      const key = sb.parentElement.dataset.seg, v = sb.dataset.v; snapshot();
+      multi.filter(x => x.type === 'clip').forEach(x => { const c = P.clips.find(k => k.id === x.id); if (!c) return; if (key === 'mtr') c.trans = { dur:0.5, ...(c.trans || {}), type:v }; else c.look = v; });
+      sb.parentElement.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b === sb));
+      renderTimeline(); requestDraw(); scheduleSave(); toast('Applicato alle clip selezionate'); return;
+    }
+    if (act === 'mcopy') copySel(false);
+    else if (act === 'mdup'){ copySel(false); pasteInternal(); }
+    else if (act === 'mdel') deleteSel();
+    return;
+  }
   if (segB && o){
     const key = segB.parentElement.dataset.seg, v = segB.dataset.v;
-    const num = ['fin','fout','mfo','mfi'].includes(key);
-    const map = { fit:'fit', fin:'fadeIn', fout:'fadeOut', tstyle:'style', tanim:'anim', mfo:'fadeOut', mfi:'fadeIn', lc:'corner', look:'look', motion:'motion' };
+    const num = ['fin','fout','mfo','mfi','crot'].includes(key);
+    const map = { crot:'rot', fit:'fit', fin:'fadeIn', fout:'fadeOut', tstyle:'style', tanim:'anim', mfo:'fadeOut', mfi:'fadeIn', lc:'corner', look:'look', motion:'motion' };
     pendingSnap = true;
     edit(() => {
       o[map[key]] = num ? +v : v;
@@ -1750,8 +1795,83 @@ insp.addEventListener('click', e => {
   }
 });
 
+/* ---------- copia, taglia, incolla ---------- */
+let clipBoard = null;
+const CLIP_MARK = 'moviola-appunti:';
+function selItems(){
+  const list = multi.length > 1 ? multi : sel && sel.type !== 'logo' ? [sel] : [];
+  return {
+    clips: P.clips.filter(c => list.some(x => x.type === 'clip' && x.id === c.id)),
+    texts: P.texts.filter(t => list.some(x => x.type === 'text' && x.id === t.id)),
+    audios: P.audios.filter(a => list.some(x => x.type === 'audio' && x.id === a.id))
+  };
+}
+function copySel(cut){
+  const it = selItems(), n = it.clips.length + it.texts.length + it.audios.length;
+  if (!n){ toast('Seleziona prima qualcosa nella timeline'); return false; }
+  const starts = [...it.texts.map(x => x.start), ...it.audios.map(x => x.start)];
+  clipBoard = { id:uid(), clips:JSON.parse(JSON.stringify(it.clips)), texts:JSON.parse(JSON.stringify(it.texts)), audios:JSON.parse(JSON.stringify(it.audios)), t0: starts.length ? Math.min(...starts) : 0 };
+  try { navigator.clipboard.writeText(CLIP_MARK + clipBoard.id).catch(() => {}); } catch(e){}
+  if (cut){ deleteSel(); toast(`Tagliato: ${n} ${n === 1 ? 'elemento' : 'elementi'}`); }
+  else toast(`Copiato: ${n} ${n === 1 ? 'elemento' : 'elementi'} · ⌘V per incollare sulla linea rossa`);
+  return true;
+}
+function pasteInternal(){
+  if (!clipBoard){ toast('Niente da incollare'); return; }
+  pause(); snapshot(); P.example = false;
+  const newSel = [];
+  if (clipBoard.clips.length){
+    const idx = insertIndexAt(T);
+    const cs = clipBoard.clips.filter(c => !c.mediaId || media.has(c.mediaId)).map(c => ({ ...JSON.parse(JSON.stringify(c)), id:uid() }));
+    P.clips.splice(idx, 0, ...cs); cs.forEach(c => { newSel.push({ type:'clip', id:c.id }); if (c.mediaId && !P.library.includes(c.mediaId)) P.library.push(c.mediaId); });
+  }
+  const dt = T - clipBoard.t0;
+  clipBoard.texts.forEach(x => { const n = { ...JSON.parse(JSON.stringify(x)), id:uid(), start:x.start + dt, end:x.end + dt }; P.texts.push(n); newSel.push({ type:'text', id:n.id }); });
+  clipBoard.audios.filter(a => media.has(a.mediaId)).forEach(a => { const n = { ...JSON.parse(JSON.stringify(a)), id:uid(), start:Math.max(0, a.start + dt) }; P.audios.push(n); newSel.push({ type:'audio', id:n.id }); if (!P.library.includes(a.mediaId)) P.library.push(a.mediaId); });
+  if (newSel.length > 1){ multi = newSel; sel = null; } else { multi = []; sel = newSel[0] || null; }
+  refresh(true); scheduleSave();
+  toast(`Incollato alla linea rossa (${fmtT(T).replace(/\.\d+$/,'')})`);
+}
+function selectAll(){
+  multi = [...P.clips.map(c => ({ type:'clip', id:c.id })), ...P.texts.map(x => ({ type:'text', id:x.id })), ...P.audios.map(a => ({ type:'audio', id:a.id }))];
+  sel = null; if (multi.length === 1){ sel = multi[0]; multi = []; }
+  renderTimeline(); renderInspector();
+}
+// incolla dall'esterno: file (Finder, screenshot, immagini copiate) e testo; ⌘V dentro l'app incolla gli elementi copiati
+document.addEventListener('paste', async e => {
+  if (e.target.matches && e.target.matches('input,textarea') || !$('#scrim').hidden) return;
+  const cd = e.clipboardData; if (!cd) return;
+  const files = [...(cd.files || [])].filter(f => isAudio(f) || isImage(f) || f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm)$/i.test(f.name));
+  e.preventDefault();
+  if (files.length){
+    // le immagini incollate senza nome (screenshot) ricevono un nome leggibile
+    const named = files.map((f, i) => (!f.name || f.name === 'image.png') ? new File([f], `Incollato ${new Date().toLocaleTimeString('it-IT').replace(/:/g, '.')}${i ? ' ' + (i+1) : ''}.png`, { type:f.type || 'image/png' }) : f);
+    const ids = await importFiles(named, true);
+    for (const id of ids || []) addFromLibrary(id);
+    return;
+  }
+  const text = (cd.getData('text/plain') || '').trim();
+  if (text.startsWith(CLIP_MARK) || (!text && clipBoard)){ pasteInternal(); return; }
+  if (text){
+    pause(); snapshot(); P.example = false;
+    const x = { id:uid(), text:text.slice(0, 300), style:'caption', size:78, y:0.8, color:'#ffffff', bg:'#111111', anim:'pop', start:Math.max(0, T), end:Math.max(0, T) + 3 };
+    P.texts.push(x); multi = []; sel = { type:'text', id:x.id }; refresh(true); scheduleSave(); toast('Testo incollato sulla linea rossa');
+    return;
+  }
+  if (clipBoard) pasteInternal();
+});
+$('#tlScroll').addEventListener('contextmenu', e => e.preventDefault());
+
 /* ---------- tools ---------- */
 function deleteSel(){
+  if (multi.length > 1){
+    pause(); snapshot();
+    const ids = t => new Set(multi.filter(x => x.type === t).map(x => x.id));
+    const c = ids('clip'), tx = ids('text'), au = ids('audio');
+    P.clips = P.clips.filter(x => !c.has(x.id)); P.texts = P.texts.filter(x => !tx.has(x.id)); P.audios = P.audios.filter(x => !au.has(x.id));
+    toast(`${multi.length} elementi eliminati`);
+    multi = []; sel = null; T = Math.min(T, total()); refresh(true); scheduleSave(); return;
+  }
   if (!sel) { toast('Seleziona prima qualcosa nella timeline'); return; }
   pause(); snapshot();
   if (sel.type === 'clip') P.clips = P.clips.filter(c => c.id !== sel.id);
@@ -2202,10 +2322,19 @@ function setFormat(f){
 document.addEventListener('keydown', e => {
   if (e.target.matches('input,textarea,select') || !$('#scrim').hidden) return;
   if (e.key === 'Escape' && document.body.classList.contains('theater')){ toggleTheater(false); return; }
+  if (e.key === 'Escape' && (multi.length || sel)){ multi = []; select(null); return; }
   if (e.key === 'f' || e.key === 'F'){ toggleTheater(); return; }
-  if (e.key === '+' || e.key === '='){ zoomAround(pps*1.4); return; }
-  if (e.key === '-' || e.key === '_'){ zoomAround(pps/1.4); return; }
-  if (e.key === 'n' || e.key === 'N'){ setSnap(!snapOn); return; }
+  if (e.key === '+' || e.key === '='){ zoomAround(pps*2); return; }
+  if (e.key === '-' || e.key === '_'){ zoomAround(pps/2); return; }
+  if (e.key === 'n' || e.key === 'N'){ if (!(e.metaKey || e.ctrlKey)) setSnap(!snapOn); return; }
+  if (e.metaKey || e.ctrlKey){
+    const k = e.key.toLowerCase();
+    if (k === 'c'){ e.preventDefault(); copySel(false); return; }
+    if (k === 'x'){ e.preventDefault(); copySel(true); return; }
+    if (k === 'a'){ e.preventDefault(); selectAll(); return; }
+    if (k === 'd'){ e.preventDefault(); if (copySel(false)) pasteInternal(); return; }
+    if (k === 'v') return;   // gestito dall'evento "incolla"
+  }
   if (e.code === 'Space'){ e.preventDefault(); playing ? pause() : play(); }
   else if (e.key === 's' || e.key === 'S'){ split(); }
   else if (e.key === 'Delete' || e.key === 'Backspace'){ e.preventDefault(); deleteSel(); }
@@ -3132,7 +3261,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T01:48:32';
+const APP_BUILD = '2026-11-02T02:01:52';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
