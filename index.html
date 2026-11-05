@@ -2412,7 +2412,7 @@ function setLibOpen(on){ document.body.classList.toggle('lib-open', on); renderL
 // trascina dalla libreria alla timeline (mouse e dito); tocco semplice = aggiungi sulla linea rossa
 let libDrag = null;
 function libDown(e){
-  if (e.target.closest('[data-imp]')){ $('#fileMedia').click(); return; }
+  if (e.target.closest('[data-imp]')) return;   // il selettore file si apre al "click" (iPhone lo blocca se aperto da pointerdown)
   const rm = e.target.closest('[data-rm]');
   if (rm){ if (!rm.disabled){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); renderLibrary(); } return; }
   const add = e.target.closest('[data-add]');
@@ -2458,6 +2458,7 @@ function libUp(e){
 ['libSide','libStrip'].forEach(id => {
   const el = $('#' + id);
   el.addEventListener('pointerdown', libDown);
+  el.addEventListener('click', e => { if (e.target.closest('[data-imp]')) $('#fileMedia').click(); });
   el.addEventListener('pointermove', libMove, { passive:false });
   el.addEventListener('pointerup', libUp);
   el.addEventListener('pointercancel', libUp);
@@ -3675,7 +3676,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-05T22:41:30';
+const APP_BUILD = '2026-11-05T23:17:50';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
