@@ -321,7 +321,7 @@ select.tin{appearance:auto}
           <button class="chip done" id="mkDone">Fatto · 0</button>
         </div>
         <div class="missbar" id="missbar" hidden><div><b id="missTitle"></b><span id="missList"></span></div><button class="btn primary" id="missImp">Importa i file</button></div>
-        <div class="hint" id="hint">Progetto di esempio. Apri la <b>Libreria</b> per importare video, foto e musica, oppure trascinali qui.</div>
+        <div class="hint" id="hint">Progetto vuoto. Apri la <b>Libreria</b> per importare video, foto e musica, oppure trascinali qui.</div>
       </section>
 
       <div class="transport">
@@ -385,16 +385,12 @@ const even = n => Math.round(n/2)*2;
 /* ---------- state ---------- */
 const media = new Map();          // id -> {id,type,name,url,el,file,w,h,duration,thumb}
 let projectId = uid();
-const exampleProject = () => ({
-  name:'Esempio', format:'9:16', example:true,
-  clips:[{ id:uid(), kind:'card', dur:3, color:'#0f2c5c', fadeIn:0, fadeOut:0.5 }],
-  texts:[
-    { id:uid(), text:'FUTSAL FABBRICO', style:'title', size:120, y:0.44, color:'#ffffff', bg:'#e63946', anim:'pop', start:0.2, end:3 },
-    { id:uid(), text:'Highlights', style:'label', size:64, y:0.56, color:'#111111', bg:'#f5c542', anim:'slide', start:0.6, end:3 }
-  ],
-  audios:[], library:[], logo:null
-});
-let P = exampleProject();
+// progetto vuoto: niente più progetto d'esempio
+const blankProject = () => ({ name:'Nuovo progetto', format:'9:16', clips:[], texts:[], audios:[], library:[], logo:null });
+const isEmptyProject = p => !(p.clips || []).length && !(p.texts || []).length && !(p.audios || []).length && !p.logo && !(p.library || []).length;
+// il vecchio progetto d'esempio mai toccato (cartello + 2 testi, nessun file): va tolto
+const isStockExample = p => !!p && p.example && (p.clips || []).length === 1 && p.clips[0].kind === 'card' && (p.texts || []).length === 2 && p.texts[0].text === 'FUTSAL FABBRICO' && !(p.audios || []).length && !(p.library || []).length && !p.logo;
+let P = blankProject(), blankStart = true;   // blankStart = progetto vuoto di partenza, non salvato finché non ci metti qualcosa
 let sel = null;        // {type:'clip'|'text'|'audio'|'logo', id}
 let multi = [];        // selezione multipla (⌘/Ctrl + clic): [{type,id}]
 const inMulti = (type, id) => multi.some(x => x.type === type && x.id === id);
@@ -485,6 +481,8 @@ function scheduleSave(){
 async function saveNow(){
   clearTimeout(saveTimer);
   if (!dbOK) return;
+  if (blankStart && isEmptyProject(P)){ setSaveState(''); return; }
+  blankStart = false;
   let thumb = '';
   try {
     const [w,h] = FORMATS[P.format], k = 120/Math.max(w,h);
@@ -562,13 +560,14 @@ async function mergeRemote(all){
       const l = lmap.get(id);
       if (!l || r.updated > l.updated){
         let p; try { p = JSON.parse(r.P); } catch(e){ continue; }
+        if (isStockExample(p)){ try { await fb.db.ref('moviola/projects/' + id).remove(); await fb.db.ref('moviola/deleted/' + id).set(Date.now()); } catch(e){} if (l) await dbDel('projects', id); continue; }
         await dbPut('projects', { id, name:r.name, updated:r.updated, duration:r.duration || 0, thumb:r.thumb || '', P:p });
         if (!l) imported++;
         if (id === projectId && r.device !== DEVICE) changedOpen = p;
       }
     }
     // progetti di questo dispositivo che mancano online (o sono più recenti): li invio
-    for (const l of local){ const r = remote[l.id]; if ((!r || l.updated > r.updated) && !(deleted[l.id] >= l.updated)) pushProject(l); }
+    for (const l of local){ const r = remote[l.id]; if ((!r || l.updated > r.updated) && !(deleted[l.id] >= l.updated) && !isStockExample(l.P)) pushProject(l); }
     // progetti eliminati su un altro dispositivo
     for (const [id, t] of Object.entries(deleted)){ const l = lmap.get(id); if (l && l.updated <= t && id !== projectId) await dbDel('projects', id); }
     if (changedOpen){
@@ -576,11 +575,18 @@ async function mergeRemote(all){
       await loadMissingMedia(); refresh(true);
       toast('Progetto aggiornato da un altro dispositivo');
     }
+    // sei sul progetto vuoto di partenza e sono arrivati progetti: apro il più recente
+    if (blankStart && isEmptyProject(P)){
+      const all = (await dbGetAll('projects')).filter(r => !isStockExample(r.P)).sort((a,b) => b.updated - a.updated);
+      if (all.length) openAfterMerge = all[0];
+    }
     if (imported) toast(imported === 1 ? 'Arrivato 1 progetto da un altro dispositivo' : `Arrivati ${imported} progetti da altri dispositivi`);
     syncUI();
     if (cloudReady && changedOpen) onCloudFiles();
   } finally { merging = false; }
+  if (openAfterMerge){ const r = openAfterMerge; openAfterMerge = null; if (blankStart && isEmptyProject(P)) await loadProject(r); }
 }
+let openAfterMerge = null;
 // carica i file del progetto che mancano: dal dispositivo se ci sono, altrimenti "da ricollegare"
 async function loadMissingMedia(){
   for (const id of usedMediaIds(P)){
@@ -878,7 +884,7 @@ async function loadProject(rec){
 async function loadProjectInner(rec){
   playing = false; setPlayIcon();
   clearMedia();
-  projectId = rec.id; P = normalize(rec.P); sel = null; T = 0;
+  projectId = rec.id; P = normalize(rec.P); blankStart = false; sel = null; T = 0;
   undoStack.length = 0; $('#btnUndo').disabled = true;
   refresh(true);
   const ids = [...usedMediaIds(P)];
@@ -2749,7 +2755,7 @@ $('#missImp').onclick = () => {
   setLibOpen(true); $('#fileMedia').click();
 };
 function refresh(rebuild){
-  $('#hint').hidden = !P.example;
+  $('#hint').hidden = !isEmptyProject(P);
   updateMissing();
   renderLibrary();
   sizePreview();
@@ -3638,8 +3644,8 @@ async function openProjects(){
   scrim.querySelector('[data-seg="pfmt"]').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFormat(b.dataset.v); });
   $('#pjNew').onclick = async () => {
     delArmed = null; closeExport();
-    clearMedia(); projectId = uid(); P = exampleProject(); P.name = 'Progetto del ' + fmtDate(Date.now()); P.example = true;
-    sel = null; T = 1.6; undoStack.length = 0; $('#btnUndo').disabled = true;
+    clearMedia(); projectId = uid(); P = blankProject(); P.name = 'Progetto del ' + fmtDate(Date.now()); blankStart = false;
+    sel = null; T = 0; undoStack.length = 0; $('#btnUndo').disabled = true;
     refresh(true); await saveNow(); toast('Nuovo progetto creato: ora aggiungi i video con + Media');
   };
   scrim.querySelector('.plist').addEventListener('click', async e => {
@@ -3657,7 +3663,7 @@ async function openProjects(){
       if (id === projectId){
         const rest = (await dbGetAll('projects')).sort((a,b) => b.updated - a.updated);
         if (rest.length) await loadProject(rest[0]);
-        else { clearMedia(); projectId = uid(); P = exampleProject(); sel = null; undoStack.length = 0; refresh(true); }
+        else { clearMedia(); projectId = uid(); P = blankProject(); blankStart = true; sel = null; T = 0; undoStack.length = 0; refresh(true); }
       }
       toast('Progetto eliminato'); openProjects();
     }
@@ -3669,7 +3675,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-02T20:27:08';
+const APP_BUILD = '2026-11-05T22:41:30';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
@@ -3710,10 +3716,12 @@ try { fbInit(); } catch(e){}
 if (gClientId) loadGis().catch(() => {});
 window.addEventListener('resize', () => renderTimeline());
 sizePreview(); renderTimeline(); renderInspector(); updateTime();
-T = 1.6; updateTime(); draw();
+T = 0; updateTime(); draw();
 (async () => {
   try {
-    const all = await dbGetAll('projects');
+    let all = await dbGetAll('projects');
+    for (const r of all.filter(r => isStockExample(r.P))) await dbDel('projects', r.id);
+    all = all.filter(r => !isStockExample(r.P));
     if (!all.length){ setSaveState(''); return; }
     let last = null; try { last = localStorage.getItem('moviola:last'); } catch(e){}
     const rec = all.find(r => r.id === last) || all.sort((a,b) => b.updated - a.updated)[0];
