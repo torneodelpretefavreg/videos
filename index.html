@@ -482,6 +482,7 @@ async function saveNow(){
   clearTimeout(saveTimer);
   if (!dbOK) return;
   if (blankStart && isEmptyProject(P)){ setSaveState(''); return; }
+  if (isDeletedId(projectId)) return;
   blankStart = false;
   let thumb = '';
   try {
@@ -527,12 +528,16 @@ function fbInit(){
 }
 const fbMsg = e => /permission/i.test(e && (e.code || e.message) || '') ? 'Permesso negato dal database: nelle regole del Realtime Database dell’Hub serve l’accesso alla sezione "moviola" per gli utenti collegati.' : /password|credential|user-not-found|invalid/i.test(e && (e.code || e.message) || '') ? 'Password non corretta.' : /network/i.test(e && (e.code || e.message) || '') ? 'Nessuna connessione: riprova.' : (e && e.message) || 'Errore di sincronizzazione';
 function pushProject(rec){
-  if (!fbUser || !fb) return;
+  if (!fbUser || !fb || isDeletedId(rec.id)) return;
   fb.db.ref('moviola/projects/' + rec.id).set({ name:rec.name, updated:rec.updated, duration:rec.duration || 0, thumb:rec.thumb || '', device:DEVICE, P:JSON.stringify(rec.P) })
     .then(() => { lastPush = Date.now(); fbErr = ''; setSaveState('Sincronizzato'); syncUI(); })
     .catch(e => { fbErr = fbMsg(e); syncUI(); });
 }
 let remoteProjects = {}, remoteDeleted = {}, cloudFiles = {}, cloudReady = false, refs = [], cloudSkip = {};
+// progetti eliminati da questo dispositivo: un'eliminazione è definitiva, nessun dispositivo può rimetterlo
+let localDeleted = {}; try { localDeleted = JSON.parse(localStorage.getItem('moviola:deleted') || '{}') || {}; } catch(e){}
+const isDeletedId = id => !!(localDeleted[id] || remoteDeleted[id]);
+function markDeleted(id){ localDeleted[id] = Date.now(); try { localStorage.setItem('moviola:deleted', JSON.stringify(localDeleted)); } catch(e){} }
 function startSync(){
   if (syncRef) return;
   syncRef = true;
@@ -542,34 +547,45 @@ function startSync(){
   const r5 = fb.db.ref('moviola/skip'); refs.push(r5);
   r5.on('value', s => { cloudSkip = s.val() || {}; }, () => {});
   r4.on('value', s => { const c = s.val() || {}; if (c.googleClientId && c.googleClientId !== gClientId){ setClientId(c.googleClientId); syncUI(); } }, () => {});
-  r1.on('value', s => { remoteProjects = s.val() || {}; mergeRemote({ projects:remoteProjects, deleted:remoteDeleted }).catch(fail); }, fail);
-  r2.on('value', s => { remoteDeleted = s.val() || {}; mergeRemote({ projects:remoteProjects, deleted:remoteDeleted }).catch(fail); }, fail);
+  let got1 = false, got2 = false;   // aspetto progetti ED eliminati prima di unire, così niente torna indietro
+  r1.on('value', s => { remoteProjects = s.val() || {}; got1 = true; if (got2) mergeRemote().catch(fail); }, fail);
+  r2.on('value', s => { remoteDeleted = s.val() || {}; got2 = true; if (got1) mergeRemote().catch(fail); }, fail);
   r3.on('value', s => { cloudFiles = s.val() || {}; cloudReady = true; onCloudFiles(); }, fail);
 }
 function stopSync(){ refs.forEach(r => r.off()); refs = []; syncRef = null; cloudReady = false; }
-let merging = false;
-async function mergeRemote(all){
-  if (merging) return; merging = true;
+let merging = false, mergeAgain = false;
+async function mergeRemote(){
+  if (merging){ mergeAgain = true; return; }
+  merging = true; mergeAgain = false;
+  let openDeleted = false;
   try {
     fbErr = '';
-    const remote = all.projects || {}, deleted = all.deleted || {};
+    const remote = remoteProjects || {};
+    // eliminazioni fatte qui (anche senza connessione) che il cloud non conosce ancora: le invio
+    for (const [id, t] of Object.entries(localDeleted)){
+      if (!remoteDeleted[id]){ try { await fb.db.ref('moviola/deleted/' + id).set(t); } catch(e){} }
+      if (remote[id]){ try { await fb.db.ref('moviola/projects/' + id).remove(); } catch(e){} }
+    }
+    // progetti eliminati che qualche dispositivo ha rimesso online: li tolgo di nuovo
+    for (const id of Object.keys(remote)) if (remoteDeleted[id] && !localDeleted[id]){ try { await fb.db.ref('moviola/projects/' + id).remove(); } catch(e){} }
+    const deleted = { ...remoteDeleted, ...localDeleted };
     const local = await dbGetAll('projects'), lmap = new Map(local.map(r => [r.id, r]));
     let changedOpen = null, imported = 0;
     for (const [id, r] of Object.entries(remote)){
-      if (!r || !r.P || deleted[id] >= r.updated) continue;
+      if (!r || !r.P || deleted[id]) continue;
       const l = lmap.get(id);
       if (!l || r.updated > l.updated){
         let p; try { p = JSON.parse(r.P); } catch(e){ continue; }
-        if (isStockExample(p)){ try { await fb.db.ref('moviola/projects/' + id).remove(); await fb.db.ref('moviola/deleted/' + id).set(Date.now()); } catch(e){} if (l) await dbDel('projects', id); continue; }
+        if (isStockExample(p)){ markDeleted(id); try { await fb.db.ref('moviola/deleted/' + id).set(Date.now()); await fb.db.ref('moviola/projects/' + id).remove(); } catch(e){} if (l) await dbDel('projects', id); continue; }
         await dbPut('projects', { id, name:r.name, updated:r.updated, duration:r.duration || 0, thumb:r.thumb || '', P:p });
         if (!l) imported++;
         if (id === projectId && r.device !== DEVICE) changedOpen = p;
       }
     }
     // progetti di questo dispositivo che mancano online (o sono più recenti): li invio
-    for (const l of local){ const r = remote[l.id]; if ((!r || l.updated > r.updated) && !(deleted[l.id] >= l.updated) && !isStockExample(l.P)) pushProject(l); }
-    // progetti eliminati su un altro dispositivo
-    for (const [id, t] of Object.entries(deleted)){ const l = lmap.get(id); if (l && l.updated <= t && id !== projectId) await dbDel('projects', id); }
+    for (const l of local){ const r = remote[l.id]; if ((!r || l.updated > r.updated) && !deleted[l.id] && !isStockExample(l.P)) pushProject(l); }
+    // progetti eliminati su un altro dispositivo: spariscono anche qui, anche se sono aperti
+    for (const id of Object.keys(deleted)){ if (lmap.has(id)) await dbDel('projects', id); if (id === projectId && !blankStart) openDeleted = true; }
     if (changedOpen){
       P = normalize(changedOpen); sel = null; multi = []; T = Math.min(T, total());
       await loadMissingMedia(); refresh(true);
@@ -577,13 +593,21 @@ async function mergeRemote(all){
     }
     // sei sul progetto vuoto di partenza e sono arrivati progetti: apro il più recente
     if (blankStart && isEmptyProject(P)){
-      const all = (await dbGetAll('projects')).filter(r => !isStockExample(r.P)).sort((a,b) => b.updated - a.updated);
+      const all = (await dbGetAll('projects')).filter(r => !isStockExample(r.P) && !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated);
       if (all.length) openAfterMerge = all[0];
     }
     if (imported) toast(imported === 1 ? 'Arrivato 1 progetto da un altro dispositivo' : `Arrivati ${imported} progetti da altri dispositivi`);
     syncUI();
     if (cloudReady && changedOpen) onCloudFiles();
   } finally { merging = false; }
+  if (openDeleted){
+    clearTimeout(saveTimer);
+    const rest = (await dbGetAll('projects')).filter(r => !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated);
+    if (rest.length) await loadProject(rest[0]);
+    else { clearMedia(); projectId = uid(); P = blankProject(); blankStart = true; sel = null; T = 0; undoStack.length = 0; refresh(true); }
+    toast('Il progetto aperto è stato eliminato su un altro dispositivo');
+  }
+  if (mergeAgain) return mergeRemote();
   if (openAfterMerge){ const r = openAfterMerge; openAfterMerge = null; if (blankStart && isEmptyProject(P)) await loadProject(r); }
 }
 let openAfterMerge = null;
@@ -911,9 +935,11 @@ async function loadProjectInner(rec){
   else if (ids.length) toast('Progetto aperto');
 }
 async function deleteProject(id){
+  markDeleted(id);
+  if (id === projectId) clearTimeout(saveTimer);
   await dbDel('projects', id);
   if (fbUser){
-    try { await fb.db.ref('moviola/projects/' + id).remove(); await fb.db.ref('moviola/deleted/' + id).set(Date.now()); delete remoteProjects[id]; } catch(e){}
+    try { await fb.db.ref('moviola/deleted/' + id).set(localDeleted[id]); await fb.db.ref('moviola/projects/' + id).remove(); delete remoteProjects[id]; } catch(e){}
     try { for (const fid of await cloudUnused()) await cloudDelete(fid); } catch(e){}
   }
   const rest = await dbGetAll('projects');
@@ -3618,7 +3644,7 @@ async function openProjects(){
   pause();
   await saveNow();
   let list = [];
-  try { list = (await dbGetAll('projects')).sort((a,b) => b.updated - a.updated); } catch(e){ dbOK = false; }
+  try { list = (await dbGetAll('projects')).filter(r => !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated); } catch(e){ dbOK = false; }
   let usage = '';
   try { const est = await navigator.storage.estimate(); if (est && est.usage != null) usage = `Spazio usato sul dispositivo: ${(est.usage/1048576).toFixed(0)} MB`; } catch(e){}
   scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pjT">
@@ -3662,7 +3688,7 @@ async function openProjects(){
       delArmed = null;
       await deleteProject(id);
       if (id === projectId){
-        const rest = (await dbGetAll('projects')).sort((a,b) => b.updated - a.updated);
+        const rest = (await dbGetAll('projects')).filter(r => !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated);
         if (rest.length) await loadProject(rest[0]);
         else { clearMedia(); projectId = uid(); P = blankProject(); blankStart = true; sel = null; T = 0; undoStack.length = 0; refresh(true); }
       }
@@ -3676,7 +3702,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-05T23:17:50';
+const APP_BUILD = '2026-11-06T10:31:13';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
@@ -3721,8 +3747,8 @@ T = 0; updateTime(); draw();
 (async () => {
   try {
     let all = await dbGetAll('projects');
-    for (const r of all.filter(r => isStockExample(r.P))) await dbDel('projects', r.id);
-    all = all.filter(r => !isStockExample(r.P));
+    for (const r of all.filter(r => isStockExample(r.P) || isDeletedId(r.id))) await dbDel('projects', r.id);
+    all = all.filter(r => !isStockExample(r.P) && !isDeletedId(r.id));
     if (!all.length){ setSaveState(''); return; }
     let last = null; try { last = localStorage.getItem('moviola:last'); } catch(e){}
     const rec = all.find(r => r.id === last) || all.sort((a,b) => b.updated - a.updated)[0];
