@@ -189,6 +189,9 @@ body.lib-open .libstrip{display:flex}
 .libstrip::-webkit-scrollbar{display:none}
 .lcard{flex:0 0 auto;width:92px;display:flex;flex-direction:column;gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px;cursor:pointer;position:relative;text-align:left;min-width:0;color:var(--fg);font:inherit}
 .lcard.new{border-color:var(--accent)}
+.lcard.other{border-style:dashed;opacity:.92}
+.lcard .proj{font-size:9.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit;font-weight:500}
+.lsep{flex:0 0 auto;align-self:stretch;display:flex;align-items:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--f-cond);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-left:1px solid var(--line);padding:0 2px 0 6px}
 .lcard .lthumb{width:100%;height:44px}
 .lcard b{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lcard span{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;font-family:var(--f-cond);font-weight:700}
@@ -2430,6 +2433,45 @@ function addFromLibrary(id, atT){
   toast(m.type === 'audio' ? `Audio aggiunto da ${fmtT(T).replace(/\.\d+$/,'')}` : 'Aggiunto alla timeline');
 }
 let libNew = new Set();
+// file degli altri progetti (e del cloud): compaiono in fondo alla libreria, un tocco e li porti qui
+let otherLib = [], otherTimer = 0;
+async function refreshOtherLib(){
+  let recs = []; try { recs = await dbGetAll('projects'); } catch(e){}
+  recs = recs.filter(r => r.id !== projectId && !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated);
+  const seen = new Set(P.library), out = [];
+  for (const r of recs){
+    const p = r.P || {}, ids = new Set([...(p.library || []), ...usedMediaIds(p)]);
+    for (const id of ids){
+      if (seen.has(id)) continue;
+      const mm = (p.mediaMeta || {})[id] || cloudFiles[id];
+      let meta = mm ? { name:mm.name, type:mm.type, size:mm.size || 0, duration:mm.duration || 0 } : null, here = media.has(id);
+      if (!here || !meta){ try { const fr = await dbGet('files', id); if (fr){ here = here || !!fr.blob; if (!meta) meta = { name:fr.name, type:fr.type, size:fr.size || (fr.blob && fr.blob.size) || 0, duration:0 }; } } catch(e){} }
+      if (!meta || !meta.type) continue;
+      seen.add(id); out.push({ id, ...meta, from:p.name || r.name || 'Progetto', here, cloud:!!(cloudFiles[id] && cloudFiles[id].complete) });
+    }
+  }
+  otherLib = out;
+  if (document.body.classList.contains('lib-open') || window.matchMedia('(min-width:1200px)').matches) renderLibrary(true);
+}
+async function bringFromOther(id){
+  const o = otherLib.find(x => x.id === id); if (!o) return;
+  snapshot();
+  if (!P.library.includes(id)) P.library.push(id);
+  P.mediaMeta = P.mediaMeta || {}; P.mediaMeta[id] = { name:o.name, type:o.type, size:o.size, duration:o.duration };
+  otherLib = otherLib.filter(x => x.id !== id);
+  if (!media.has(id)){
+    let f = null; try { f = await dbGet('files', id); } catch(e){}
+    if (f && f.blob){
+      try { const file = f.blob instanceof File ? f.blob : new File([f.blob], f.name || 'media', { type:f.blob.type }); const m = o.type === 'video' ? await loadVideo(file, id) : o.type === 'image' ? await loadImage(file, id) : await loadAudio(file, id); media.set(id, m); if (m.type === 'video') thumbQueue.push(m); runThumbs(); } catch(e){}
+    }
+  }
+  scheduleSave();
+  if (media.has(id)){ addFromLibrary(id); return; }
+  if (!pendingRelink.some(p => p.id === id)) pendingRelink.push({ id, type:o.type, name:o.name, size:o.size });
+  if (o.cloud && fbUser){ cloudDownload(id); toast(`Scarico ${o.name} dal cloud: quando è pronto toccalo per metterlo in timeline`, 5000); }
+  else toast(`${o.name} non è su questo dispositivo: premi Importa e sceglilo, si ricollega da solo`, 6000);
+  renderLibrary();
+}
 function libItems(){
   return P.library.map(id => {
     const m = media.get(id);
@@ -2442,8 +2484,12 @@ const thumbHTML = it => it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</d
 const cloudTxt = id => uploading.has(id) ? ` · ☁ ${Math.round(uploading.get(id)*100)}%` : downloading.has(id) ? ` · ⬇ ${Math.round(downloading.get(id)*100)}%` : (cloudFiles[id] && cloudFiles[id].complete) ? ' · ☁' : '';
 const durTxt = it => (!it.m ? (downloading.has(it.id) ? 'scarico dal cloud' : 'da ricollegare') : it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'')) + cloudTxt(it.id);
 const ICO_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
-function renderLibrary(){
+function renderLibrary(fromOther){
+  if (!fromOther){ clearTimeout(otherTimer); otherTimer = setTimeout(refreshOtherLib, 300); }
   const items = libItems();
+  const others = otherLib.filter(o => !P.library.includes(o.id));
+  const oTxt = o => (o.type === 'image' ? 'Foto' : o.duration ? fmtT(o.duration).replace(/\.\d+$/,'') : o.type === 'audio' ? 'Audio' : 'Video') + (o.here ? '' : o.cloud ? ' · ☁' : ' · non qui');
+  const oThumb = o => o.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${media.get(o.id) && media.get(o.id).thumb ? `background-image:url('${media.get(o.id).thumb}')` : ''}"></div>`;
   // pannello laterale (schermi larghi)
   const groups = [['video','Video'],['image','Foto'],['audio','Audio']];
   const row = it => {
@@ -2455,10 +2501,11 @@ function renderLibrary(){
   $('#libSide').innerHTML = `<h2>Libreria</h2>
     <button class="btn primary" data-imp="1">Importa file</button>
     <p class="note">Trascina un elemento sulla timeline nel punto che vuoi, oppure tocca + per metterlo sulla linea rossa.</p>
-    <div class="lib">${items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('') : '<p class="note">Vuota. Importa o trascina qui video, foto e canzoni.</p>'}</div>`;
+    <div class="lib">${items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('') : '<p class="note">Vuota. Importa o trascina qui video, foto e canzoni.</p>'}</div>${others.length ? `<div class="libh">Da altri progetti · ${others.length}</div><div class="lib">${others.map(o => `<div class="litem">${oThumb(o)}<div class="linfo"><b>${esc(o.name)}</b><span>${oTxt(o)} · ${esc(o.from)}</span></div><button class="btn primary" data-other="${o.id}" aria-label="Porta in questo progetto">+</button></div>`).join('')}</div>` : ''}`;
   // striscia (telefono e schermi medi)
+  const otherStrip = others.length ? `<div class="lsep">Altri progetti</div>` + others.map(o => `<button type="button" class="lcard other" data-other="${o.id}" aria-label="${esc(o.name)} da ${esc(o.from)}">${oThumb(o)}<b>${esc(o.name)}</b><span>${oTxt(o)}</span><span class="proj">${esc(o.from)}</span></button>`).join('') : '';
   $('#libStrip').innerHTML = `<button class="lcard imp" data-imp="1">${ICO_PLUS}Importa</button>` + items.map(it =>
-    `<div class="lcard${libNew.has(it.id) ? ' new' : ''}" data-lib="${it.id}" role="button" tabindex="0" aria-label="${esc(it.name)}">${thumbHTML(it)}<b>${esc(it.name)}</b><span>${durTxt(it)}</span>${usedInTimeline(it.id) ? '<i class="used" aria-hidden="true"></i>' : ''}</div>`).join('');
+    `<div class="lcard${libNew.has(it.id) ? ' new' : ''}" data-lib="${it.id}" role="button" tabindex="0" aria-label="${esc(it.name)}">${thumbHTML(it)}<b>${esc(it.name)}</b><span>${durTxt(it)}</span>${usedInTimeline(it.id) ? '<i class="used" aria-hidden="true"></i>' : ''}</div>`).join('') + otherStrip;
   $('#tMedia').setAttribute('aria-pressed', document.body.classList.contains('lib-open'));
 }
 function setLibOpen(on){ document.body.classList.toggle('lib-open', on); renderLibrary(); }
@@ -2512,7 +2559,7 @@ function libUp(e){
 ['libSide','libStrip'].forEach(id => {
   const el = $('#' + id);
   el.addEventListener('pointerdown', libDown);
-  el.addEventListener('click', e => { if (e.target.closest('[data-imp]')) $('#fileMedia').click(); });
+  el.addEventListener('click', e => { if (e.target.closest('[data-imp]')) $('#fileMedia').click(); const ot = e.target.closest('[data-other]'); if (ot) bringFromOther(ot.dataset.other); });
   el.addEventListener('pointermove', libMove, { passive:false });
   el.addEventListener('pointerup', libUp);
   el.addEventListener('pointercancel', libUp);
@@ -3733,7 +3780,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-06T14:49:07';
+const APP_BUILD = '2026-11-06T16:57:27';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
