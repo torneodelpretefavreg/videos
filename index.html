@@ -469,7 +469,7 @@ const dbDel = (store, key) => idb(store, 'readwrite', s => s.delete(key));
 let dbOK = true, persistAsked = false, pendingRelink = [];
 const STORE_LIMIT = 1024*1048576;   // oltre 1 GB il file non viene copiato nel database
 async function storeFile(m){
-  if (!dbOK) return;
+  if (!dbOK || !m.file || m.file.remote) return;   // i video in streaming restano su Drive
   try {
     if (m.file.size > STORE_LIMIT){
       await dbPut('files', { id:m.id, type:m.type, name:m.name, size:m.file.size, blob:null });
@@ -685,6 +685,7 @@ function driveConnect(){
         if (r.error){ driveErr = 'Accesso a Google non riuscito: ' + r.error; syncUI(); rej(new Error(r.error)); return; }
         gToken = r.access_token; gTokenExp = Date.now() + (r.expires_in || 3600)*1000; driveErr = '';
         try { sessionStorage.setItem('moviola:gtok', JSON.stringify({ tok:gToken, exp:gTokenExp })); } catch(e){}
+        sendTokSW(); revivStreams();
         res(); driveQuotaRefresh(); onCloudFiles();
       },
       error_callback:e => { driveErr = e && e.type === 'popup_failed_to_open' ? 'Il browser ha bloccato la finestra di Google: consenti i popup e riprova.' : 'Accesso a Google annullato.'; syncUI(); rej(new Error('popup')); }
@@ -739,8 +740,59 @@ async function driveDownload(fileId, onp){
   return new Blob(parts);
 }
 const driveFree = () => driveQuota ? driveQuota.limit - driveQuota.usage : Infinity;
+/* ---------- streaming da Google Drive: il video si legge a pezzi, senza scaricarlo tutto ---------- */
+const STREAM_MIN = 120e6;   // i video più grandi di così si guardano in streaming invece di scaricarli
+let swReady = false;
+class RemoteFile {
+  constructor(url, size, name, type){ this.url = url; this.size = size; this.name = name; this.type = type; this.remote = true; }
+  slice(a = 0, b = this.size){
+    a = Math.max(0, a); b = Math.min(this.size, b); const url = this.url;
+    return { size:Math.max(0, b - a), arrayBuffer: async () => {
+      if (b <= a) return new ArrayBuffer(0);
+      for (let k = 0; ; k++){
+        try {
+          const r = await fetch(url, { headers:{ Range:`bytes=${a}-${b-1}` } });
+          if (r.status === 401){ gToken = null; gTokenExp = 0; needDrive = true; updateMissing(); throw new Error('Accesso a Google Drive scaduto: ricollegalo e riprova'); }
+          if (!r.ok) throw new Error('Lettura da Drive non riuscita (' + r.status + ')');
+          return await r.arrayBuffer();
+        } catch(e){ if (k >= 2 || /scaduto/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 800*(k+1))); }
+      }
+    } };
+  }
+  arrayBuffer(){ return this.slice(0, this.size).arrayBuffer(); }
+}
+function sendTokSW(){ try { if (gToken && navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type:'token', tok:gToken, exp:gTokenExp }); } catch(e){} }
+async function initSW(){
+  if (!('serviceWorker' in navigator) || location.protocol !== 'https:' || /claude\.ai|claudeusercontent/.test(location.host)) return;
+  try {
+    await navigator.serviceWorker.register('sw.js');
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) await new Promise(r => { navigator.serviceWorker.addEventListener('controllerchange', r, { once:true }); setTimeout(r, 4000); });
+    swReady = !!navigator.serviceWorker.controller;
+    sendTokSW();
+    if (swReady && fbUser) onCloudFiles();
+  } catch(e){ swReady = false; }
+}
+const canStream = f => swReady && f && f.backend === 'drive' && f.type === 'video' && f.driveId && f.size > STREAM_MIN;
+async function streamMedia(id, f){
+  if (media.has(id) || downloading.has(id)) return;
+  if (!driveReady()){ needDrive = true; updateMissing(); return; }
+  sendTokSW();
+  downloading.set(id, 0); updateMissing();
+  try {
+    const url = new URL(`__drive/${encodeURIComponent(f.driveId)}?size=${f.size}&mime=${encodeURIComponent(f.mime || 'video/mp4')}`, location.href).href;
+    const m = await loadVideo(new RemoteFile(url, f.size, f.name, f.mime || 'video/mp4'), id);
+    m.remote = true; media.set(id, m); thumbQueue.push(m);
+    pendingRelink = pendingRelink.filter(p => p.id !== id);
+    if (!P.library.includes(id) && usedMediaIds(P).has(id)) P.library.push(id);
+    toast(`${f.name}: lo guardi in streaming da Drive`, 3000);
+  } catch(e){ toast('Streaming da Drive non riuscito: ' + e.message, 5000); }
+  finally { downloading.delete(id); refresh(false); runThumbs(); }
+}
+// dopo un nuovo accesso a Drive: i video in streaming che si erano fermati ripartono
+function revivStreams(){ for (const m of media.values()) if (m.remote && m.el.error){ const t = m.el.currentTime; m.el.src = m.url; try { m.el.load(); m.el.currentTime = t; } catch(e){} } }
 function cloudUpload(m){
-  if (!fbUser || !m || !m.file || uploading.has(m.id) || cloudSkip[m.id]) return;
+  if (!fbUser || !m || !m.file || m.file.remote || uploading.has(m.id) || cloudSkip[m.id]) return;
   const f = cloudFiles[m.id]; if (f && f.complete) return;
   if (driveOn()){
     if (!driveReady()) return;                       // si carica appena colleghi Drive
@@ -782,6 +834,7 @@ function cloudDownload(id){
   const f = cloudFiles[id];
   if (!fbUser || !f || !f.complete || downloading.has(id) || media.has(id)) return;
   if (f.backend === 'drive' && !driveReady()){ needDrive = true; updateMissing(); return; }
+  if (canStream(f)) return streamMedia(id, f);
   downloading.set(id, 0); updateMissing();
   return cloudQueue(async () => {
     try {
@@ -917,7 +970,7 @@ function syncUI(){
 }
 function clearMedia(){
   pauseMedia(); clearOvEls();
-  for (const m of media.values()){ try { m.el.pause && m.el.pause(); m.el.removeAttribute('src'); m.el.remove(); URL.revokeObjectURL(m.url); } catch(e){} }
+  for (const m of media.values()){ try { m.el.pause && m.el.pause(); m.el.removeAttribute('src'); m.el.remove(); if (!m.remote) URL.revokeObjectURL(m.url); } catch(e){} }
   media.clear(); audioCache.clear();
 }
 let thumbQueue = [], projectLoading = null;
@@ -1506,9 +1559,9 @@ function requestDraw(){ if (drawQueued || playing) return; drawQueued = true; re
 const pool = $('#pool');
 function loadVideo(file, fixedId){
   return new Promise((res, rej) => {
-    const url = URL.createObjectURL(file);
+    const url = file.remote ? file.url : URL.createObjectURL(file);
     const el = document.createElement('video');
-    el.playsInline = true; el.setAttribute('playsinline',''); el.muted = true; el.preload = 'auto'; el.crossOrigin = 'anonymous';
+    el.playsInline = true; el.setAttribute('playsinline',''); el.muted = true; el.preload = file.remote ? 'metadata' : 'auto'; el.crossOrigin = 'anonymous';
     el.src = url; pool.appendChild(el);
     try { el.load(); } catch(e){}
     // Safari su iPhone a volte non legge il video finché non parte: lo avvio muto e lo fermo subito
@@ -3290,7 +3343,7 @@ async function getAudioBuffer(mediaId){
   if (audioCache.has(mediaId)) return audioCache.get(mediaId);
   const m = media.get(mediaId); let buf = null;
   if (!m) return null;
-  if (m.file.size > AUDIO_LIMIT){ skippedAudio.add(m.name); return null; }
+  if (m.file.size > AUDIO_LIMIT || (m.file.remote && m.file.size > 60e6)){ skippedAudio.add(m.name); return null; }
   try {
     const ab = await m.file.arrayBuffer();
     try { buf = await new OfflineAudioContext(2, 1, 48000).decodeAudioData(ab.slice(0)); }
@@ -4071,7 +4124,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-06T19:22:35';
+const APP_BUILD = '2026-11-06T20:10:15';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
@@ -4105,6 +4158,7 @@ $('#updGo').onclick = applyUpdate;
 $('#updNo').onclick = () => { updDismissed = $('#upd').dataset.v; $('#upd').hidden = true; };
 document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - lastUpdCheck > 60000) checkUpdate(false); });
 setTimeout(() => checkUpdate(false, true), 600);
+initSW();
 try { if (localStorage.getItem('moviola:updated')){ localStorage.removeItem('moviola:updated'); setTimeout(() => toast(`Moviola aggiornata · versione ${APP_BUILD.slice(0,16).replace('T',' ')}`, 3000), 900); } } catch(e){}
 
 /* ---------- boot ---------- */
