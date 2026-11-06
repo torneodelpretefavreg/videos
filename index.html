@@ -111,6 +111,10 @@ body.theater .transport{position:fixed;left:0;right:0;bottom:0;z-index:61;backgr
 .tick.minor{height:6px;top:16px}
 .track{position:absolute;left:0;right:0}
 #trV{top:30px;height:56px}
+.bar.over{background:#3a2f63 center/auto 100% repeat-x;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.8);box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+.bar.over .bname{background:rgba(0,0,0,.45);padding:0 4px;border-radius:3px}
+.clip .gapmark{display:none}
+.gapzone{position:absolute;top:6px;bottom:6px;border:1px dashed rgba(255,255,255,.18);border-radius:5px;pointer-events:none;background:repeating-linear-gradient(135deg,rgba(255,255,255,.04) 0 6px,transparent 6px 12px)}
 #trT{top:92px;height:24px}
 #trA{top:122px;height:22px}
 .lane-empty{position:absolute;top:0;bottom:0;display:flex;align-items:center;font-size:12px;color:var(--dim);padding-left:6px;white-space:nowrap;pointer-events:none}
@@ -348,6 +352,7 @@ body:has(#scrim:not([hidden])) .pastebar{display:none}
         <div class="tl-scroll" id="tlScroll">
           <div class="tl-inner" id="tlInner">
             <div class="ruler" id="ruler"></div>
+            <div class="track" id="trO"></div>
             <div class="track" id="trV"></div>
             <div class="track" id="trT"></div>
             <div class="track" id="trA"></div>
@@ -395,8 +400,8 @@ const even = n => Math.round(n/2)*2;
 const media = new Map();          // id -> {id,type,name,url,el,file,w,h,duration,thumb}
 let projectId = uid();
 // progetto vuoto: niente più progetto d'esempio
-const blankProject = () => ({ name:'Nuovo progetto', format:'9:16', clips:[], texts:[], audios:[], library:[], logo:null });
-const isEmptyProject = p => !(p.clips || []).length && !(p.texts || []).length && !(p.audios || []).length && !p.logo && !(p.library || []).length;
+const blankProject = () => ({ name:'Nuovo progetto', format:'9:16', clips:[], texts:[], audios:[], overlays:[], library:[], logo:null });
+const isEmptyProject = p => !(p.clips || []).length && !(p.texts || []).length && !(p.audios || []).length && !(p.overlays || []).length && !p.logo && !(p.library || []).length;
 // il vecchio progetto d'esempio mai toccato (cartello + 2 testi, nessun file): va tolto
 const isStockExample = p => !!p && p.example && (p.clips || []).length === 1 && p.clips[0].kind === 'card' && (p.texts || []).length === 2 && p.texts[0].text === 'FUTSAL FABBRICO' && !(p.audios || []).length && !(p.library || []).length && !p.logo;
 let P = blankProject(), blankStart = true;   // blankStart = progetto vuoto di partenza, non salvato finché non ci metti qualcosa
@@ -406,6 +411,8 @@ const inMulti = (type, id) => multi.some(x => x.type === type && x.id === id);
 // porta i progetti vecchi (una sola "music") al nuovo formato con libreria e più brani audio
 function normalize(p){
   if (!p.audios) p.audios = [];
+  if (!p.overlays) p.overlays = [];
+  (p.clips || []).forEach(c => { if (!(c.gap > 0)) c.gap = 0; });
   if (!p.texts) p.texts = [];
   if (p.music){
     p.audios.push({ id:uid(), mediaId:p.music.mediaId, name:p.music.name, start:0, offset:p.music.offset || 0, len:36000, volume:p.music.volume ?? 0.8, fadeIn:0, fadeOut:p.music.fadeOut ?? 2 });
@@ -476,6 +483,7 @@ function usedMediaIds(p){
   p.clips.forEach(c => c.mediaId && s.add(c.mediaId));
   if (p.music) s.add(p.music.mediaId);
   (p.audios || []).forEach(a => s.add(a.mediaId));
+  (p.overlays || []).forEach(o => o.mediaId && s.add(o.mediaId));
   (p.library || []).forEach(id => s.add(id));
   if (p.logo) s.add(p.logo.mediaId);
   return s;
@@ -904,7 +912,7 @@ function syncUI(){
   if (bo) bo.onclick = () => { fb.auth.signOut(); toast('Sincronizzazione disattivata'); };
 }
 function clearMedia(){
-  pauseMedia();
+  pauseMedia(); clearOvEls();
   for (const m of media.values()){ try { m.el.pause && m.el.pause(); m.el.removeAttribute('src'); m.el.remove(); URL.revokeObjectURL(m.url); } catch(e){} }
   media.clear(); audioCache.clear();
 }
@@ -979,8 +987,24 @@ function undo(){
 
 const spd = c => (c.kind === 'video' && c.speed) ? c.speed : 1;
 const clipLen = c => c.kind === 'video' ? Math.max(0.05, (c.out - c.in)/spd(c)) : c.dur;
-function layout(){ let s = 0; return P.clips.map(c => { const o = { c, start:s, len:clipLen(c) }; s += o.len; return o; }); }
-function clipsDur(){ return P.clips.reduce((a,c) => a + clipLen(c), 0); }
+// traccia principale: ogni clip può avere uno spazio vuoto (nero) prima di sé: c.gap secondi
+function layout(){ let s = 0; return P.clips.map(c => { s += c.gap > 0 ? c.gap : 0; const o = { c, start:s, len:clipLen(c) }; s += o.len; return o; }); }
+function clipsDur(){ let s = 0; for (const c of P.clips) s += (c.gap > 0 ? c.gap : 0) + clipLen(c); return s; }
+// mette la clip c al tempo ts: le altre restano dove sono, vengono spinte avanti solo se si sovrapporrebbero
+function placeClip(c, ts, base){
+  const abs = base || new Map(layout().map(o => [o.c, o.start]));
+  const others = P.clips.filter(x => x !== c).sort((a,b) => abs.get(a) - abs.get(b));
+  const len = clipLen(c), mid = Math.max(0, ts) + len/2;
+  let idx = others.findIndex(o => abs.get(o) + clipLen(o)/2 > mid); if (idx < 0) idx = others.length;
+  const seq = [...others]; seq.splice(idx, 0, c);
+  const want = new Map(abs); want.set(c, Math.max(0, ts));
+  let cur = 0;
+  for (const x of seq){ const st = Math.max(want.has(x) ? want.get(x) : cur, cur); const g = st - cur; x.gap = g > 0.01 ? Math.round(g*1000)/1000 : 0; cur += x.gap + clipLen(x); }
+  P.clips = seq;
+}
+// traccia sopra (sovrapposizioni)
+const ovLen = o => o.kind === 'video' ? Math.max(0.1, o.out - o.in) : (o.dur || 3);
+function overlaysEnd(){ return (P.overlays || []).reduce((e,o) => Math.max(e, o.start + ovLen(o)), 0); }
 // volume a tratti: fattore 0..1 nel punto lt della clip, con rampe morbide
 function segGain(item, lt){
   let f = 1;
@@ -999,7 +1023,7 @@ function audLen(a){
 }
 function audiosEnd(){ return P.audios.reduce((e,a) => Math.max(e, a.start + audLen(a)), 0); }
 // Durata: comandano le clip; senza clip valgono i brani audio; i testi possono allungarla
-function total(){ return Math.max(clipsDur() || audiosEnd(), P.texts.reduce((a,x) => Math.max(a, x.end), 0)); }
+function total(){ return Math.max(clipsDur() || audiosEnd(), P.texts.reduce((a,x) => Math.max(a, x.end), 0), overlaysEnd()); }
 function clipAt(t){
   const L = layout();
   for (const o of L) if (t >= o.start && t < o.start + o.len) return o;
@@ -1011,6 +1035,7 @@ function findSel(){
   if (sel.type === 'clip') return P.clips.find(c => c.id === sel.id);
   if (sel.type === 'text') return P.texts.find(c => c.id === sel.id);
   if (sel.type === 'audio') return P.audios.find(a => a.id === sel.id);
+  if (sel.type === 'over') return (P.overlays || []).find(o => o.id === sel.id);
   if (sel.type === 'logo') return P.logo;
 }
 
@@ -1227,7 +1252,7 @@ function transitionAt(t){
   const L = layout();
   for (let i = 0; i < L.length - 1; i++){
     const A = L[i], B = L[i+1], tr = A.c.trans;
-    if (!tr || tr.type === 'none') continue;
+    if (!tr || tr.type === 'none' || B.c.gap > 0.01) continue;
     const d = Math.min(tr.dur || 0.5, A.len, B.len), cut = A.start + A.len;
     if (t < cut - d/2 || t >= cut + d/2) continue;
     const p = (t - (cut - d/2)) / d;
@@ -1410,6 +1435,7 @@ function render(g, W, H, t, mode){
     const o = clipAt(t);
     if (o) drawClipTo(g, W, H, o.c, clamp(t - o.start, 0, o.len), true);
   }
+  for (const ov of P.overlays || []) if (t >= ov.start && t < ov.start + ovLen(ov)) drawOverlay(g, W, H, ov, t - ov.start);
   for (const tx of P.texts) if (t >= tx.start && t < tx.end) drawText(g, tx, t, W, H);
   if (P.logo){
     const m = media.get(P.logo.mediaId);
@@ -1423,6 +1449,52 @@ function render(g, W, H, t, mode){
   g.restore();
 }
 function draw(){ render(ctx, cv.width, cv.height, T); }
+// elementi video propri per la traccia sopra (così lo stesso file può stare sotto e sopra insieme)
+const ovEls = new Map(), exportOv = new Map();
+function ovEl(ov){
+  const m = media.get(ov.mediaId); if (!m || m.type !== 'video') return null;
+  let r = ovEls.get(ov.id);
+  if (!r || r.mediaId !== ov.mediaId){
+    if (r){ r.el.pause(); r.el.remove(); }
+    const el = document.createElement('video');
+    el.playsInline = true; el.setAttribute('playsinline',''); el.muted = true; el.preload = 'auto'; el.src = m.url; pool.appendChild(el);
+    el.addEventListener('seeked', requestDraw); el.addEventListener('loadeddata', requestDraw);
+    r = { el, mediaId:ov.mediaId }; ovEls.set(ov.id, r);
+    try { el.currentTime = ov.in || 0; } catch(e){}
+  }
+  return r.el;
+}
+function clearOvEls(){ for (const r of ovEls.values()){ r.el.pause(); r.el.removeAttribute('src'); r.el.remove(); } ovEls.clear(); }
+function drawOverlay(g, W, H, ov, lt){
+  const m = media.get(ov.mediaId); if (!m) return;
+  let src = null, sw = 0, sh = 0, rot = 0;
+  if (m.type === 'image'){ src = m.el; sw = m.w; sh = m.h; }
+  else if (renderMode === 'export' && exportOv.has(ov.id)){ const x = exportOv.get(ov.id); if (x.frame){ src = x.frame; sw = x.w; sh = x.h; rot = x.rot; } else if (x.el && x.el.readyState >= 2){ src = x.el; sw = m.w; sh = m.h; } }
+  else { const el = ovEl(ov); if (el && el.readyState >= 2){ src = el; sw = m.w; sh = m.h; } }
+  if (!src || !sw || !sh) return;
+  const ur = ((ov.rot || 0) % 360 + 360) % 360, tr = (rot + ur) % 360;
+  const dw0 = ur % 180 ? sh : sw, dh0 = ur % 180 ? sw : sh;   // misure dopo la rotazione scelta
+  const len = ovLen(ov);
+  let a = ov.opacity ?? 1;
+  if (ov.fadeIn > 0 && lt < ov.fadeIn) a *= lt/ov.fadeIn;
+  if (ov.fadeOut > 0 && lt > len - ov.fadeOut) a *= Math.max(0, (len - lt)/ov.fadeOut);
+  if (a <= 0.002) return;
+  g.save(); g.globalAlpha = a;
+  if (ov.mode === 'full'){
+    drawFit(g, src, dw0, dh0, W, H, { fit:'cover', zoom:1, panX:0, panY:0 }, tr);
+  } else {
+    const u = Math.min(W, H), bw = Math.max(40, (ov.size || 0.42)*W), bh = bw*dh0/dw0;
+    const cx = clamp((ov.x ?? 0.5)*W, bw/2, W - bw/2), cy = clamp((ov.y ?? 0.5)*H, bh/2, H - bh/2);
+    const x = cx - bw/2, y = cy - bh/2, rad = u*0.025;
+    g.shadowColor = 'rgba(0,0,0,.5)'; g.shadowBlur = u*0.03; g.fillStyle = '#000';
+    rr(g, x, y, bw, bh, rad); g.fill(); g.shadowBlur = 0; g.shadowColor = 'transparent';
+    g.save(); rr(g, x, y, bw, bh, rad); g.clip(); g.translate(x, y);
+    drawFit(g, src, dw0, dh0, bw, bh, { fit:'cover', zoom:1, panX:0, panY:0 }, tr);
+    g.restore();
+    if (ov.border !== false){ g.lineWidth = Math.max(2, u*0.006); g.strokeStyle = 'rgba(255,255,255,.95)'; rr(g, x, y, bw, bh, rad); g.stroke(); }
+  }
+  g.restore();
+}
 let drawQueued = false;
 function requestDraw(){ if (drawQueued || playing) return; drawQueued = true; requestAnimationFrame(() => { drawQueued = false; draw(); }); }
 
@@ -1534,7 +1606,22 @@ function applyRate(){
   for (const m of media.values()) if (m.type === 'video' || m.type === 'audio'){ try { m.el.playbackRate = rate; } catch(e){} }
 }
 function videoEls(){ return [...media.values()].filter(m => m.type === 'video').map(m => m.el); }
-function pauseMedia(){ for (const m of media.values()) if ((m.type === 'video' || m.type === 'audio') && !m.el.paused) m.el.pause(); activeClipId = null; }
+function pauseMedia(){ for (const m of media.values()) if ((m.type === 'video' || m.type === 'audio') && !m.el.paused) m.el.pause(); for (const r of ovEls.values()) if (!r.el.paused) r.el.pause(); activeClipId = null; }
+function syncOverlays(force, play){
+  const liveIds = new Set();
+  for (const ov of P.overlays || []){
+    if (ov.kind !== 'video' || T < ov.start || T >= ov.start + ovLen(ov)) continue;
+    const el = ovEl(ov); if (!el) continue;
+    liveIds.add(ov.id);
+    const lt = T - ov.start, target = ov.in + lt;
+    let a = 1; if (ov.fadeIn > 0 && lt < ov.fadeIn) a = lt/ov.fadeIn; if (ov.fadeOut > 0 && lt > ovLen(ov) - ov.fadeOut) a = Math.min(a, (ovLen(ov) - lt)/ov.fadeOut);
+    el.muted = !(ov.volume > 0) || !play; try { el.volume = clamp((ov.volume || 0)*a, 0, 1); } catch(e){}
+    if (force || Math.abs(el.currentTime - target) > (play ? 0.35 : 0.03)) el.currentTime = target;
+    if (play){ try { el.playbackRate = rate; } catch(e){} if (el.paused) el.play().catch(()=>{}); }
+    else if (!el.paused) el.pause();
+  }
+  for (const [id, r] of ovEls) if (!liveIds.has(id) && !r.el.paused) r.el.pause();
+}
 function play(){
   if (!total()) return;
   if (T >= total() - 0.02) T = 0;
@@ -1594,8 +1681,10 @@ function syncMedia(force){
     live.add(el);
   }
   for (const m of media.values()) if (m.type === 'audio' && !live.has(m.el) && !m.el.paused) m.el.pause();
+  syncOverlays(force, true);
 }
 function seekPreview(fast){
+  if ((P.overlays || []).length) syncOverlays(false, false);
   const o = clipAt(T);
   if (o && o.c.kind === 'video'){
     const m = media.get(o.c.mediaId);
@@ -1664,8 +1753,9 @@ function renderTimeline(){
       <div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
   const LL = layout();
+  LL.forEach(o => { if (o.c.gap > 0.01) v += `<div class="gapzone" style="left:${xOf(o.start - o.c.gap)}px;width:${Math.max(2, o.c.gap*pps - 2)}px"></div>`; });
   for (let i = 0; i < LL.length - 1; i++){
-    const tr = LL[i].c.trans; if (!tr || tr.type === 'none') continue;
+    const tr = LL[i].c.trans; if (!tr || tr.type === 'none' || LL[i+1].c.gap > 0.01) continue;
     v += `<div class="tmark" data-clip="${LL[i].c.id}" style="left:${xOf(LL[i].start + LL[i].len)}px" title="${esc((TRANS.find(x => x[0] === tr.type) || ['', ''])[1])}"></div>`;
   }
   if (!P.clips.length) v = `<div class="lane-empty" style="left:${X0}px">Nessuna clip: apri la Libreria</div>`;
@@ -1687,7 +1777,24 @@ function renderTimeline(){
     arows[r] = a.start + audLen(a); arowOf.set(a.id, r);
   });
   const nA = Math.max(1, arows.length), AH = 22;
-  const topV = 28, topT = topV + VH + 6, topA = topT + nRows*(RH+GAP) + 2;
+  // traccia sopra: righe separate quando si sovrappongono
+  const orows = [], orowOf = new Map();
+  [...(P.overlays || [])].sort((a,b) => a.start - b.start).forEach(o => {
+    let r = orows.findIndex(end => end <= o.start + 0.001);
+    if (r < 0){ r = orows.length; orows.push(0); }
+    orows[r] = o.start + ovLen(o); orowOf.set(o.id, r);
+  });
+  const OH = (P.overlays || []).length ? (mob ? 30 : 34) : 20, nO = Math.max(1, orows.length);
+  const topO = 28, topV = topO + nO*(OH+GAP) + 2, topT = topV + VH + 6, topA = topT + nRows*(RH+GAP) + 2;
+  $('#trO').style.cssText = `top:${topO}px;height:${nO*(OH+GAP)}px`;
+  let ovh = '';
+  for (const ov of P.overlays || []){
+    const isSel = sel && sel.type === 'over' && sel.id === ov.id, m = media.get(ov.mediaId);
+    const bg = m && m.thumb ? `background-image:url('${m.thumb}')` : '';
+    ovh += `<div class="bar over${isSel?' sel':''}" data-over="${ov.id}" style="top:${orowOf.get(ov.id)*(OH+GAP)}px;bottom:auto;height:${OH}px;line-height:${OH-4}px;left:${xOf(ov.start)}px;width:${Math.max(6, ovLen(ov)*pps-2)}px;${bg}"><span class="bname">⧉ ${esc(ov.name || 'Sopra')}</span><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
+  }
+  if (!ovh) ovh = `<div class="lane-empty" style="left:${X0}px;line-height:${OH}px">Sopra: trascina qui un video per sovrapporlo</div>`;
+  $('#trO').innerHTML = ovh;
   $('#trV').style.cssText = `top:${topV}px;height:${VH}px`;
   $('#trT').style.cssText = `top:${topT}px;height:${nRows*(RH+GAP)}px`;
   $('#trA').style.cssText = `top:${topA}px;height:${nA*(AH+GAP)}px`;
@@ -1717,12 +1824,19 @@ function renderTimeline(){
 let drag = null;
 inner.addEventListener('pointerdown', e => {
   const h = e.target.closest('.h');
-  const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]'), audEl = e.target.closest('[data-audio]');
+  const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]'), audEl = e.target.closest('[data-audio]'), ovEl0 = e.target.closest('[data-over]');
   const onRuler = e.target.closest('#ruler');
   if (onRuler){
     pause(); drag = { kind:'scrub' }; inner.setPointerCapture(e.pointerId);
     scrubTo(e); e.preventDefault(); return;
   }
+  if (ovEl0 && ovEl0.classList.contains('sel') && !multi.length && !(e.metaKey || e.ctrlKey || e.shiftKey)){
+    const ov = P.overlays.find(x => x.id === ovEl0.dataset.over);
+    pause();
+    drag = { kind:'over', side:h ? h.dataset.h : 'm', ov, x0:e.clientX, s0:ov.start, in0:ov.in, out0:ov.out, d0:ov.dur, snap:false, T0:T };
+    inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
+  }
+  if (ovEl0 && !(e.metaKey || e.ctrlKey || e.shiftKey)){ drag = { kind:'tap', x0:e.clientX, y0:e.clientY, ovEl:ovEl0, clientX:e.clientX }; return; }
   if (h && clipEl && clipEl.classList.contains('sel') && !multi.length){
     const c = P.clips.find(c => c.id === clipEl.dataset.clip);
     pause();
@@ -1731,7 +1845,8 @@ inner.addEventListener('pointerdown', e => {
   }
   if (clipEl && !h && !(e.metaKey || e.ctrlKey || e.shiftKey) && (clipEl.classList.contains('sel') || e.pointerType === 'mouse')){
     const c = P.clips.find(c => c.id === clipEl.dataset.clip);
-    drag = { kind:'clipmove', c, x0:e.clientX, y0:e.clientY, moving:false };
+    const L0 = layout();
+    drag = { kind:'clipmove', c, x0:e.clientX, y0:e.clientY, moving:false, base:new Map(L0.map(o => [o.c, o.start])), s0:(L0.find(o => o.c === c) || { start:0 }).start, order:[...P.clips], gaps:P.clips.map(x => x.gap || 0), T0:T };
     inner.setPointerCapture(e.pointerId);
     if (clipEl.classList.contains('sel')) e.preventDefault();
     return;
@@ -1791,12 +1906,44 @@ inner.addEventListener('pointermove', e => {
     }
     const r = scroller.getBoundingClientRect();
     if (e.clientX < r.left + 30) scroller.scrollLeft -= 10; else if (e.clientX > r.right - 30) scroller.scrollLeft += 10;
-    const t = tOf(e.clientX - inner.getBoundingClientRect().left);
-    const c = drag.c, others = P.clips.filter(x => x !== c);
-    let acc = 0, idx = 0;
-    for (const o of others){ const L = clipLen(o); if (acc + L/2 < t) idx++; acc += L; }
-    if (P.clips.indexOf(c) !== idx){ others.splice(idx, 0, c); P.clips = others; }
+    // spostamento libero: la clip va dove la porti, le altre restano ferme (vengono spinte solo se serve)
+    const c = drag.c, len = clipLen(c);
+    let ts = Math.max(0, drag.s0 + (e.clientX - drag.x0)/pps), hit = null;
+    if (snapOn){
+      const pts = [0, drag.T0];
+      for (const [x, st] of drag.base) if (x !== c) pts.push(st, st + clipLen(x));
+      P.texts.forEach(x => pts.push(x.start, x.end)); P.audios.forEach(a => pts.push(a.start, a.start + audLen(a)));
+      const tol = 12/pps; let best = null, bd = tol;
+      for (const p of pts){ const d1 = Math.abs(p - ts), d2 = Math.abs(p - (ts + len)); if (d1 < bd){ bd = d1; best = p; hit = p; } if (d2 < bd){ bd = d2; best = p - len; hit = p; } }
+      if (best != null) ts = Math.max(0, best);
+    }
+    P.clips = [...drag.order]; drag.order.forEach((x, k) => x.gap = drag.gaps[k]);
+    placeClip(c, ts, drag.base);
+    showSnapLine(hit);
     renderTimeline();
+    return;
+  }
+  if (drag.kind === 'over'){
+    const d = (e.clientX - drag.x0)/pps, ov = drag.ov, m = media.get(ov.mediaId);
+    if (!drag.snap && Math.abs(e.clientX - drag.x0) > 3){ snapshot(); drag.snap = true; }
+    if (!drag.snap) return;
+    const ex = [drag.T0]; let hit = null;
+    const len0 = ov.kind === 'video' ? drag.out0 - drag.in0 : drag.d0;
+    if (drag.side === 'm'){ const r = snapRange(Math.max(0, drag.s0 + d), len0, ov, ex); ov.start = Math.max(0, r.s); hit = r.hit; T = ov.start + 0.02; }
+    else if (drag.side === 'l'){
+      const v = snapT(drag.s0 + d, ov, ex);
+      let dd = clamp(v - drag.s0, -drag.s0, len0 - 0.3);
+      if (ov.kind === 'video') dd = Math.max(dd, -drag.in0);
+      ov.start = drag.s0 + dd; if (ov.kind === 'video') ov.in = drag.in0 + dd; else ov.dur = drag.d0 - dd;
+      T = ov.start + 0.02; if (v !== drag.s0 + d) hit = ov.start;
+    } else {
+      const v = snapT(drag.s0 + len0 + d, ov, ex), nl = Math.max(0.3, v - drag.s0);
+      if (ov.kind === 'video') ov.out = Math.min(m ? m.duration : drag.out0, drag.in0 + nl); else ov.dur = Math.min(60, nl);
+      T = ov.start + ovLen(ov) - 0.04; if (v !== drag.s0 + len0 + d) hit = ov.start + ovLen(ov);
+    }
+    showSnapLine(hit);
+    T = clamp(T, 0, total());
+    renderTimeline(); seekPreview(); updateTime(); syncInspector();
     return;
   }
   if (drag.kind === 'audio'){
@@ -1824,6 +1971,7 @@ function endDrag(e){
   if (d.kind === 'tap' && e.type === 'pointerup' && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 8){
     const rect = inner.getBoundingClientRect();
     const t = tOf(e.clientX - rect.left);
+    if (d.ovEl){ multi = []; select({ type:'over', id:d.ovEl.dataset.over }); setT(tOf(e.clientX - rect.left)); return; }
     const hit = d.clipEl ? { type:'clip', id:d.clipEl.dataset.clip } : d.textEl ? { type:'text', id:d.textEl.dataset.text } : d.audEl ? { type:'audio', id:d.audEl.dataset.audio } : null;
     if (hit && (e.metaKey || e.ctrlKey || e.shiftKey)){
       // ⌘/Ctrl + clic: aggiunge o toglie dalla selezione
@@ -1840,12 +1988,13 @@ function endDrag(e){
   } else if (d.kind === 'clipmove'){
     document.body.classList.remove('clipdrag');
     if (d.moving){
+      showSnapLine(null);
       const o = layout().find(o => o.c === d.c); T = o ? o.start : T;
       renderTimeline(); renderInspector(); seekPreview(); updateTime(); scheduleSave();
     } else if (e.type === 'pointerup'){
       select({ type:'clip', id:d.c.id }); setT(tOf(e.clientX - inner.getBoundingClientRect().left));
     }
-  } else if (d.kind === 'trim' || d.kind === 'text' || d.kind === 'audio'){ renderTimeline(); renderInspector(); if (d.snap) scheduleSave(); }
+  } else if (d.kind === 'trim' || d.kind === 'text' || d.kind === 'audio' || d.kind === 'over'){ renderTimeline(); renderInspector(); if (d.snap) scheduleSave(); }
 }
 inner.addEventListener('pointerup', endDrag);
 inner.addEventListener('pointercancel', endDrag);
@@ -1915,6 +2064,7 @@ function snapPoints(skip, extra){
   layout().forEach(o => pts.push(o.start, o.start + o.len));
   P.texts.forEach(x => { if (x !== skip) pts.push(x.start, x.end); });
   P.audios.forEach(a => { if (a !== skip) pts.push(a.start, a.start + audLen(a)); });
+  (P.overlays || []).forEach(o => { if (o !== skip) pts.push(o.start, o.start + ovLen(o)); });
   return pts;
 }
 // restituisce il tempo agganciato al bordo più vicino (entro ~12 px)
@@ -2026,6 +2176,8 @@ function renderInspector(){
       <div class="grp"><div class="lab">Movimento</div>${seg('motion',MOTIONS,c.motion || 'none')}</div>
       <div class="grp"><div class="lab">Effetti</div><div class="seg" data-tog="fx" role="group">${[['flash','Flash'],['glitch','Glitch'],['grain','Grana'],['vig','Vignetta']].map(([k,l]) => `<button type="button" data-k="${k}" aria-pressed="${!!(c.fx && c.fx[k])}">${l}</button>`).join('')}</div></div>`;
     if (c.kind === 'video') h += `<div class="row"><button class="btn" data-act="freeze">Fermo immagine qui</button></div>`;
+    if (c.kind !== 'card') h += `<div class="grp"><div class="lab">Traccia</div><div class="row"><button class="btn" data-act="toover">⧉ Metti sopra (sovrapposto)</button></div><p class="note">La clip passa nella traccia sopra e si vede sopra al video sotto, in un riquadro o a tutto schermo.</p></div>`;
+    if (c.gap > 0.01) h += `<div class="grp"><div class="lab">Spazio vuoto prima <output>${fmtS(c.gap)}</output></div><div class="row"><button class="btn" data-act="nogap">Chiudi lo spazio</button><button class="btn" data-act="allgaps">Chiudi tutti gli spazi</button></div></div>`;
     if (c.kind === 'card') h += `<div class="grp"><div class="lab">Colore</div>${swatches('ccol', c.color)}</div>`;
     if (c.kind !== 'card'){
       h += `<div class="grp"><div class="lab">Ruota</div>${seg('crot',[[0,'0°'],[90,'90° ↻'],[180,'180°'],[270,'90° ↺']],c.rot || 0)}</div>
@@ -2065,6 +2217,25 @@ function renderInspector(){
       <p class="note">Trascina il brano per spostarlo, le maniglie per accorciarlo. Con l’Aggancio attivo i bordi si attaccano a clip, testi e altri brani.</p>
       ${segUI(au, au.start)}
       <div class="row"><button class="btn" data-act="adup">Duplica</button><button class="btn danger" data-act="adel">Elimina audio</button></div>`;
+  } else if (sel.type === 'over'){
+    const ov = o, m = media.get(ov.mediaId);
+    h = `<h2>Sopra <small>${esc(ov.name || '')}</small></h2>
+      <div class="grp"><div class="lab">Come si vede</div>${seg('omode',[['pip','Riquadro'],['full','Tutto schermo']],ov.mode || 'pip')}</div>`;
+    if ((ov.mode || 'pip') === 'pip') h += `<div class="grp"><div class="lab">Posizione</div>${seg('opos',[['tl','↖'],['tc','↑'],['tr','↗'],['c','●'],['bl','↙'],['bc','↓'],['br','↘']],'')}</div>
+      ${range('osize','Dimensione',0.15,1,0.01,ov.size ?? 0.42,pct)}
+      ${range('ox','Orizzontale',0,1,0.005,ov.x ?? 0.5,v=>Math.round(v*100)+'%')}
+      ${range('oy','Verticale',0,1,0.005,ov.y ?? 0.5,v=>Math.round(v*100)+'%')}
+      <div class="grp"><div class="lab">Bordo bianco</div>${seg('obord',[['1','Sì'],['0','No']],ov.border === false ? '0' : '1')}</div>`;
+    h += range('oop','Opacità',0.1,1,0.01,ov.opacity ?? 1,pct);
+    if (ov.kind === 'video') h += `<div class="grp"><div class="lab">Taglio <output id="oLen">${fmtS(ovLen(ov))}</output></div>${range('oin','Inizio',0,m?m.duration:10,0.01,ov.in,secs)}${range('oout','Fine',0,m?m.duration:10,0.01,ov.out,secs)}</div>` + range('ovol','Volume',0,1,0.01,ov.volume || 0,pct);
+    else h += range('odur','Durata',0.5,30,0.1,ov.dur || 3,secs);
+    h += `<div class="grp"><div class="lab">Ruota</div>${seg('orot',[[0,'0°'],[90,'90° ↻'],[180,'180°'],[270,'90° ↺']],ov.rot || 0)}</div>
+      <div class="grp"><div class="lab">Entrata</div>${seg('ofi',fadeOpts,ov.fadeIn || 0)}</div>
+      <div class="grp"><div class="lab">Uscita</div>${seg('ofo',fadeOpts,ov.fadeOut || 0)}</div>
+      <div class="grp"><div class="lab">In timeline <output id="oTimes">${fmtT(ov.start)} → ${fmtT(ov.start + ovLen(ov))}</output></div>
+      <div class="row"><button class="btn" data-act="ostart">Inizia qui</button><button class="btn" data-act="odup">Duplica</button></div></div>
+      <p class="note">Trascinalo nella traccia sopra per spostarlo dove vuoi, le maniglie per accorciarlo.</p>
+      <div class="row"><button class="btn" data-act="odown">Rimetti nella traccia principale</button><button class="btn danger" data-act="odel">Elimina</button></div>`;
   } else if (sel.type === 'logo'){
     const lg = o;
     h = `<h2>Logo</h2>
@@ -2073,7 +2244,7 @@ function renderInspector(){
       ${range('lop','Opacità',0.2,1,0.01,lg.opacity,pct)}
       <div class="row"><button class="btn" data-act="lrep">Cambia immagine</button><button class="btn danger" data-act="ldel">Rimuovi logo</button></div>`;
   }
-  if (o && sel && sel.type !== 'logo') h += `<div class="row"><button class="btn" data-act="copy1">Copia (⌘C)</button></div>`;
+  if (o && sel && sel.type !== 'logo' && sel.type !== 'over') h += `<div class="row"><button class="btn" data-act="copy1">Copia (⌘C)</button></div>`;
   insp.innerHTML = h;
   document.body.classList.toggle('has-sel', !!o);
   const h2 = insp.querySelector('h2');
@@ -2088,6 +2259,7 @@ function syncInspector(){
     const l = $('#lenO'); if (l) l.textContent = fmtS(clipLen(o));
   } else if (sel.type === 'clip'){ const d = $('#cdur'); if (d){ d.value = o.dur; $('#cdur_o').textContent = secs(o.dur); } }
   else if (sel.type === 'text'){ const t = $('#tTimes'); if (t) t.textContent = `${fmtT(o.start)} → ${fmtT(o.end)}`; }
+  else if (sel.type === 'over'){ const t = $('#oTimes'); if (t) t.textContent = `${fmtT(o.start)} → ${fmtT(o.start + ovLen(o))}`; const l = $('#oLen'); if (l) l.textContent = fmtS(ovLen(o)); const a = $('#oin'), b = $('#oout'); if (a){ a.value = o.in; $('#oin_o').textContent = secs(o.in); } if (b){ b.value = o.out; $('#oout_o').textContent = secs(o.out); } }
   else if (sel.type === 'audio'){ const t = $('#aTimes'); if (t) t.textContent = `${fmtT(o.start)} → ${fmtT(o.start + audLen(o))}`; const f = $('#moff'); if (f){ f.value = o.offset; $('#moff_o').textContent = fmtT(o.offset).replace(/\.\d+$/,''); } }
 }
 
@@ -2112,6 +2284,14 @@ insp.addEventListener('input', e => {
     case 'tcol_c': edit(() => o.color = v, { timeline:false }); markSw('tcol', v); break;
     case 'tbg_c': edit(() => o.bg = v, { timeline:false }); markSw('tbg', v); break;
     case 'mvol': edit(() => o.volume = +v, { timeline:false }); setOut(pct(+v)); break;
+    case 'osize': edit(() => o.size = +v, { timeline:false }); setOut(pct(+v)); break;
+    case 'ox': edit(() => o.x = +v, { timeline:false }); setOut(Math.round(v*100)+'%'); break;
+    case 'oy': edit(() => o.y = +v, { timeline:false }); setOut(Math.round(v*100)+'%'); break;
+    case 'oop': edit(() => o.opacity = +v, { timeline:false }); setOut(pct(+v)); break;
+    case 'ovol': edit(() => o.volume = +v, { timeline:false }); setOut(pct(+v)); break;
+    case 'odur': edit(() => o.dur = +v); setOut(secs(+v)); syncInspector(); break;
+    case 'oin': edit(() => { o.in = Math.min(+v, o.out - 0.2); T = o.start + 0.02; }, { seek:true }); setOut(secs(o.in)); syncInspector(); break;
+    case 'oout': edit(() => { o.out = Math.max(+v, o.in + 0.2); T = o.start + ovLen(o) - 0.04; }, { seek:true }); setOut(secs(o.out)); syncInspector(); break;
     default:
       if (/^vs\d+$/.test(id)){ const i = +id.slice(2); edit(() => { o.vsegs[i].v = +v; }); setOut(Math.round(v*100) + '%'); }
     case 'moff': edit(() => o.offset = +v); setOut(fmtT(+v).replace(/\.\d+$/,'')); break;
@@ -2148,6 +2328,21 @@ insp.addEventListener('click', e => {
       if (L) T = key === 'cspd' ? L.start : clamp(L.start + L.len - Math.min(o.trans ? o.trans.dur : 0.5, L.len)*0.9, 0, total());
     }, { rebuild:true, seek:true });
     if (key !== 'cspd' && v !== 'none'){ setTimeout(() => { if (!playing) play(); }, 60); }
+    return;
+  }
+  if (segB && o && sel && sel.type === 'over'){
+    const key = segB.parentElement.dataset.seg, v = segB.dataset.v; pendingSnap = true;
+    const P0 = { tl:[.27,.17], tc:[.5,.17], tr:[.73,.17], c:[.5,.5], bl:[.27,.83], bc:[.5,.83], br:[.73,.83] };
+    edit(() => {
+      if (key === 'omode') o.mode = v;
+      else if (key === 'opos'){ const q = P0[v]; const sz = o.size ?? 0.42; o.x = v.includes('l') ? Math.max(sz/2 + 0.03, 0) : v.includes('r') ? Math.min(1 - sz/2 - 0.03, 1) : 0.5; o.y = q[1]; }
+      else if (key === 'obord') o.border = v === '1';
+      else if (key === 'orot') o.rot = +v;
+      else if (key === 'ofi') o.fadeIn = +v;
+      else if (key === 'ofo') o.fadeOut = +v;
+      if (T < o.start || T >= o.start + ovLen(o)) T = o.start + 0.02;
+    }, { rebuild:true, seek:true });
+    if (key === 'omode' || key === 'opos') renderInspector();
     return;
   }
   if (e.target.closest('[data-act="done"]')){ multi = []; select(null); return; }
@@ -2191,7 +2386,14 @@ insp.addEventListener('click', e => {
   switch (act){
     case 'left': if (i > 0) edit(() => { P.clips.splice(i,1); P.clips.splice(i-1,0,o); }, { rebuild:true, seek:true }); break;
     case 'right': if (i < P.clips.length-1) edit(() => { P.clips.splice(i,1); P.clips.splice(i+1,0,o); }, { rebuild:true, seek:true }); break;
-    case 'dup': edit(() => { const c = { ...o, id:uid() }; P.clips.splice(i+1,0,c); sel = { type:'clip', id:c.id }; }, { rebuild:true }); break;
+    case 'dup': edit(() => { const c = { ...o, id:uid(), gap:0 }; P.clips.splice(i+1,0,c); sel = { type:'clip', id:c.id }; }, { rebuild:true }); break;
+    case 'nogap': edit(() => { o.gap = 0; }, { rebuild:true, seek:true }); break;
+    case 'allgaps': edit(() => P.clips.forEach(c => c.gap = 0), { rebuild:true, seek:true }); toast('Spazi chiusi: le clip sono di nuovo attaccate'); break;
+    case 'toover': toOverlay(o); break;
+    case 'odown': fromOverlay(o); break;
+    case 'odel': deleteSel(); break;
+    case 'ostart': edit(() => { o.start = Math.max(0, T); }, { rebuild:true }); break;
+    case 'odup': edit(() => { const c = { ...o, id:uid(), start:o.start + ovLen(o) }; P.overlays.push(c); sel = { type:'over', id:c.id }; }, { rebuild:true }); break;
     case 'del': deleteSel(); break;
     case 'cut': split(); break;
     case 'alltr': { const tr = o.trans || { type:'none', dur:0.5 }; edit(() => P.clips.forEach((c,k) => { if (k < P.clips.length - 1) c.trans = { ...tr }; }), { rebuild:true }); toast('Transizione applicata a tutte le clip'); break; }
@@ -2270,7 +2472,7 @@ async function pasteInternal(){
   const newSel = [];
   if (clipBoard.clips.length){
     const idx = insertIndexAt(T);
-    const cs = clipBoard.clips.map(c => ({ ...JSON.parse(JSON.stringify(c)), id:uid() }));
+    const cs = clipBoard.clips.map(c => ({ ...JSON.parse(JSON.stringify(c)), id:uid(), gap:0 }));
     P.clips.splice(idx, 0, ...cs); cs.forEach(c => { newSel.push({ type:'clip', id:c.id }); if (c.mediaId && !P.library.includes(c.mediaId)) P.library.push(c.mediaId); });
   }
   const dt = T - clipBoard.t0;
@@ -2326,6 +2528,7 @@ function deleteSel(){
   if (sel.type === 'clip') P.clips = P.clips.filter(c => c.id !== sel.id);
   else if (sel.type === 'text') P.texts = P.texts.filter(c => c.id !== sel.id);
   else if (sel.type === 'audio') P.audios = P.audios.filter(a => a.id !== sel.id);
+  else if (sel.type === 'over') P.overlays = P.overlays.filter(a => a.id !== sel.id);
   else if (sel.type === 'logo') P.logo = null;
   sel = null; T = Math.min(T, total());
   refresh(true);
@@ -2351,7 +2554,7 @@ function split(){
   const lt = T - o.start;
   if (lt < 0.1 || lt > o.len - 0.1){ toast('Sposta la linea rossa dentro la clip'); return; }
   snapshot();
-  const c = o.c, b = { ...c, id:uid(), vsegs:(c.vsegs || []).map(s => ({ ...s, a:s.a - lt, b:s.b - lt })).filter(s => s.b > 0) };
+  const c = o.c, b = { ...c, id:uid(), gap:0, vsegs:(c.vsegs || []).map(s => ({ ...s, a:s.a - lt, b:s.b - lt })).filter(s => s.b > 0) };
   c.vsegs = (c.vsegs || []).filter(s => s.a < lt);
   if (c.kind === 'video'){ b.in = c.in + lt*spd(c); c.out = b.in; }
   else { b.dur = c.dur - lt; c.dur = lt; }
@@ -2385,7 +2588,7 @@ async function freezeFrame(c){
   const img = { id:uid(), kind:'image', mediaId:m.id, name:file.name, dur:1.5, fit:c.fit, zoom:c.zoom, panX:c.panX, panY:c.panY, fadeIn:0, fadeOut:0, motion:'zin', look:c.look, fx:{ flash:true } };
   let idx = P.clips.indexOf(c) + 1;
   if (lt > 0.1 && lt < L.len - 0.1){
-    const b = { ...c, id:uid(), in:srcT, fadeIn:0 }; c.out = srcT; c.fadeOut = 0; c.trans = null;
+    const b = { ...c, id:uid(), gap:0, in:srcT, fadeIn:0 }; c.out = srcT; c.fadeOut = 0; c.trans = null;
     P.clips.splice(idx, 0, b);
   } else if (lt <= 0.1) idx = P.clips.indexOf(c);
   P.clips.splice(idx, 0, img);
@@ -2403,10 +2606,40 @@ function addCard(){
 
 /* ---------- libreria del progetto ---------- */
 const ICO_AUD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
-function usedInTimeline(id){ return P.clips.some(c => c.mediaId === id) || P.audios.some(a => a.mediaId === id); }
+// traccia sopra: sposta una clip sopra (lasciando il suo posto vuoto) e viceversa
+function toOverlay(c){
+  const L = layout().find(x => x.c === c); if (!L || c.kind === 'card') return;
+  pause(); snapshot();
+  const i = P.clips.indexOf(c), nx = P.clips[i+1];
+  if (nx) nx.gap = Math.round(((nx.gap || 0) + (c.gap || 0) + L.len)*1000)/1000;
+  P.clips.splice(i, 1);
+  const ov = { id:uid(), kind:c.kind, mediaId:c.mediaId, name:c.name, start:L.start, in:c.in || 0, out:c.out, dur:c.kind === 'image' ? c.dur : undefined, volume:0, mode:'pip', size:0.5, x:0.5, y:0.22, opacity:1, fadeIn:0, fadeOut:0, rot:c.rot || 0, border:true };
+  P.overlays.push(ov); sel = { type:'over', id:ov.id }; T = L.start + 0.02;
+  refresh(true); seekPreview(); scheduleSave();
+  toast('Messo sopra: ora scegli riquadro o tutto schermo', 3500);
+}
+function fromOverlay(ov){
+  pause(); snapshot();
+  const base = { id:uid(), mediaId:ov.mediaId, name:ov.name, fit:'cover', zoom:1, panX:0, panY:0, fadeIn:0, fadeOut:0, rot:ov.rot || 0, gap:0 };
+  const c = ov.kind === 'video' ? { ...base, kind:'video', in:ov.in, out:ov.out, volume:ov.volume > 0 ? ov.volume : 1 } : { ...base, kind:'image', dur:ov.dur || 3 };
+  P.overlays = P.overlays.filter(x => x !== ov);
+  P.clips.push(c); placeClip(c, ov.start);
+  sel = { type:'clip', id:c.id }; T = (layout().find(x => x.c === c) || { start:0 }).start;
+  refresh(true); seekPreview(); scheduleSave();
+  toast('Rimesso nella traccia principale');
+}
+function addOverlay(id, t){
+  const m = media.get(id); if (!m || m.type === 'audio') return;
+  pause(); snapshot(); if (!P.library.includes(id)) P.library.push(id);
+  const ov = { id:uid(), kind:m.type, mediaId:m.id, name:m.name, start:Math.max(0, t), in:0, out:m.type === 'video' ? Math.min(m.duration, 15) : undefined, dur:m.type === 'image' ? 3 : undefined, volume:0, mode:'pip', size:0.5, x:0.5, y:0.22, opacity:1, fadeIn:0, fadeOut:0, rot:0, border:true };
+  P.overlays.push(ov); sel = { type:'over', id:ov.id }; T = ov.start + 0.02;
+  refresh(true); seekPreview(); scheduleSave(); renderLibrary();
+  toast('Aggiunto sopra');
+}
+function usedInTimeline(id){ return (P.overlays || []).some(o => o.mediaId === id) || P.clips.some(c => c.mediaId === id) || P.audios.some(a => a.mediaId === id); }
 function insertIndexAt(t){
   const o = clipAt(t);
-  if (!o) return P.clips.length;
+  if (!o){ const L = layout(), k = L.findIndex(x => x.start > t); return k < 0 ? P.clips.length : k; }
   return t - o.start < o.len/2 ? P.clips.indexOf(o.c) : P.clips.indexOf(o.c) + 1;
 }
 function addFromLibrary(id, atT){
@@ -2543,6 +2776,9 @@ function libMove(e){
     const t = Math.max(0, tOf(e.clientX - inner.getBoundingClientRect().left));
     const m = media.get(libDrag.id);
     let x;
+    const orc = $('#trO').getBoundingClientRect();
+    libDrag.ov = m.type !== 'audio' && e.clientY >= orc.top - 8 && e.clientY <= orc.bottom + 2;
+    if (libDrag.ov){ const st = snapT(t, null, [T]); mk.style.left = xOf(st) + 'px'; mk.hidden = false; libDrag.t = st; return; }
     if (m.type === 'audio'){ const st = snapT(t, null, [T]); x = xOf(st); libDrag.t = st; }
     if (m.type !== 'audio'){ const L = layout(), idx = insertIndexAt(t); x = xOf(idx < L.length ? L[idx].start : clipsDur()); }
     mk.style.left = x + 'px'; mk.hidden = false; if (m.type !== 'audio') libDrag.t = t;
@@ -2554,7 +2790,7 @@ function libUp(e){
   $('#dropmark').hidden = true; $('.tl-wrap').classList.remove('drop');
   if (d.ghost) d.ghost.remove();
   if (!d.on){ if (e.type === 'pointerup') addFromLibrary(d.id); return; }
-  if (d.t != null) addFromLibrary(d.id, d.t);
+  if (d.t != null){ if (d.ov) addOverlay(d.id, d.t); else addFromLibrary(d.id, d.t); }
 }
 ['libSide','libStrip'].forEach(id => {
   const el = $('#' + id);
@@ -3093,6 +3329,21 @@ async function renderMix(dur, sr = 48000){
     const off = Math.max(0, c.in - base);
     if (off < buf.duration){ src.start(s + Math.max(0, base - c.in), off, Math.min(o.len, buf.duration - off)); any = true; }
   }
+  for (const ov of P.overlays || []){
+    if (ov.kind !== 'video' || !(ov.volume > 0) || ov.start >= dur) continue;
+    const ca = await getClipAudio(ov);
+    if (ca.silent || ca.fail){ if (ca.fail) note(ov.mediaId, false); continue; }
+    note(ov.mediaId, true);
+    const buf = ca.buf, base = ca.base, len = Math.min(ovLen(ov), dur - ov.start);
+    const src = oc.createBufferSource(); src.buffer = buf;
+    const g = oc.createGain(); src.connect(g); g.connect(oc.destination);
+    const v = ov.volume, s0 = ov.start, e0 = s0 + len, fi = Math.min(ov.fadeIn || 0, len/2), fo = Math.min(ov.fadeOut || 0, len/2);
+    g.gain.setValueAtTime(fi > 0 ? 0 : v, s0);
+    if (fi > 0) g.gain.linearRampToValueAtTime(v, s0 + fi);
+    if (fo > 0){ g.gain.setValueAtTime(v, e0 - fo); g.gain.linearRampToValueAtTime(0, e0); }
+    const off = Math.max(0, ov.in - base);
+    if (off < buf.duration){ src.start(s0 + Math.max(0, base - ov.in), off, Math.min(len, buf.duration - off)); any = true; }
+  }
   for (const a of P.audios){
     const buf = await getAudioBuffer(a.mediaId);
     if (!buf){ note(a.mediaId, false); continue; }
@@ -3286,6 +3537,35 @@ async function liveFrameFor(c, srcT){
   const rot = info.idx.rot;
   return { frame:fr, rot, w:rot % 180 ? fr.displayHeight : fr.displayWidth, h:rot % 180 ? fr.displayWidth : fr.displayHeight };
 }
+// traccia sopra nell'export: un decodificatore per ogni elemento sopra (o il suo video, se il file non si decodifica)
+const ovDecs = new Map();
+async function prepareOverlays(t, useDec){
+  exportOv.clear();
+  for (const ov of P.overlays || []){
+    if (ov.kind !== 'video') continue;
+    const active = t >= ov.start && t < ov.start + ovLen(ov);
+    let d = ovDecs.get(ov.id);
+    if (!active){ if (d){ d.dec.close(); ovDecs.delete(ov.id); } continue; }
+    const m = media.get(ov.mediaId); if (!m) continue;
+    const srcT = Math.min(ov.in + (t - ov.start), ov.out - 1e-3);
+    const info = useDec ? await vInfo(m) : null;
+    if (info){
+      try {
+        if (!d || srcT < d.t - 1e-3){ if (d) d.dec.close(); d = { dec:new ClipDecoder(m.file, info.idx), t:srcT }; await d.dec.open(info.cfg, srcT); ovDecs.set(ov.id, d); }
+        d.t = srcT;
+        const fr = await d.dec.frameAt(srcT);
+        if (fr){ const rot = info.idx.rot; exportOv.set(ov.id, { frame:fr, rot, w:rot % 180 ? fr.displayHeight : fr.displayWidth, h:rot % 180 ? fr.displayWidth : fr.displayHeight }); continue; }
+      } catch(e){ if (d) d.dec.close(); ovDecs.delete(ov.id); }
+    }
+    const el = ovEl(ov);
+    if (el){
+      el.muted = true; if (!el.paused) el.pause();
+      if (el.readyState < 1 || !isFinite(el.duration)) await new Promise(r => { const to = setTimeout(r, 8000); el.addEventListener('loadedmetadata', () => { clearTimeout(to); r(); }, { once:true }); });
+      if (isFinite(el.duration)){ await seekTo(el, srcT); exportOv.set(ov.id, { el }); }
+    }
+  }
+}
+function closeOvDecs(){ for (const d of ovDecs.values()) d.dec.close(); ovDecs.clear(); exportOv.clear(); }
 function closeLiveDec(){ if (liveDec) liveDec.close(); liveDec = null; liveDecClip = null; liveDecT = -1; }
 // fotogramma fermo per le transizioni, letto dal decodificatore (già ruotato)
 async function decodedStill(mediaId, t){
@@ -3561,6 +3841,7 @@ async function exportVideo(opt, onProg, signal){
       if (lf){
         exportLive = { clipId:o.c.id, ...lf };
         await prepareFrozen(t);
+        if ((P.overlays || []).length) await prepareOverlays(t, true);
         render(g, W, H, t, 'export');
         exportLive = null;
         encodeAt(i);
@@ -3569,7 +3850,7 @@ async function exportVideo(opt, onProg, signal){
         continue;
       }
     }
-    if (canPlayCapture && o && o.c.kind === 'video' && !slowClips.has(o.c.id) && !transitionAt(t)){
+    if (canPlayCapture && o && o.c.kind === 'video' && !slowClips.has(o.c.id) && !transitionAt(t) && !(P.overlays || []).some(x => x.kind === 'video')){
       let j = i + 1;
       while (j < n){ const tj = tAt(j), oj = clipAt(tj); if (!oj || oj.c !== o.c || transitionAt(tj)) break; j++; }
       if (j - i >= fps*8){
@@ -3580,12 +3861,13 @@ async function exportVideo(opt, onProg, signal){
       }
     }
     await prepareFrame(t);
+    if ((P.overlays || []).length) await prepareOverlays(t, opt.decode !== false);
     render(g, W, H, t, 'export');
     encodeAt(i);
     await waitEnc(8);
     i++;
   }
-  } finally { closeLiveDec(); exportLive = null; }
+  } finally { closeLiveDec(); closeOvDecs(); exportLive = null; }
   if (signal.aborted){ try { ve.close(); } catch(e){} throw new DOMException('abort','AbortError'); }
   await ve.flush(); ve.close();
   if (encErr) throw encErr;
@@ -3605,7 +3887,7 @@ async function exportVideo(opt, onProg, signal){
   const silentTxt = mixInfo.silent.length ? ` · ${mixInfo.silent.join(', ')} ${mixInfo.silent.length === 1 ? 'non ha' : 'non hanno'} audio proprio` : '';
   const audioInfo = (audioMode === 'aac' ? `Audio AAC ${Math.round(acfg.bitrate/1000)} kbps · ${mixInfo.used.length} ${mixInfo.used.length === 1 ? 'sorgente' : 'sorgenti'}`
     : audioMode === 'realtime' ? `Audio inserito col registratore di sistema · ${mixInfo.used.length} ${mixInfo.used.length === 1 ? 'sorgente' : 'sorgenti'}`
-    : (P.audios.length || P.clips.some(c => c.kind === 'video') ? 'Senza audio' : 'Nessun audio nel progetto')) + silentTxt;
+    : (P.audios.length || P.clips.some(c => c.kind === 'video') || (P.overlays || []).some(o => o.kind === 'video' && o.volume > 0) ? 'Senza audio' : 'Nessun audio nel progetto')) + silentTxt;
   return { blob, W, H, audioNote: [audioNote, ...notes].filter(Boolean).join(' '), audioInfo, audioOk: audioMode !== 'none' };
 }
 
@@ -3780,7 +4062,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-06T16:57:27';
+const APP_BUILD = '2026-11-06T18:44:32';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
