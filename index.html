@@ -290,6 +290,11 @@ select.tin{appearance:auto}
 .meta{display:flex;justify-content:space-between;font-family:var(--f-cond);font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
 .sheet video{width:100%;max-height:42vh;background:#000;border-radius:8px}
 .err{color:#ff9c94;font-size:14px;line-height:1.5;margin:0}
+.pastebar{position:absolute;left:50%;transform:translateX(-50%);top:58px;z-index:6;width:max-content;display:flex;align-items:center;gap:8px;background:var(--panel,#1b2130);border:1px solid var(--acc,#f5c542);border-radius:14px;padding:6px 6px 6px 14px;box-shadow:0 8px 24px rgba(0,0,0,.45);max-width:calc(100% - 32px);font-weight:600;font-size:14px}
+.pastebar[hidden]{display:none}
+.pastebar span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pastebar .btn{min-height:36px;padding:0 12px;white-space:nowrap;flex:none}
+body:has(#scrim:not([hidden])) .pastebar{display:none}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--fg);color:var(--bg);font-weight:600;padding:9px 14px;border-radius:10px;z-index:80;max-width:calc(100% - 32px);text-align:center}
 #pool{position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:.01;pointer-events:none;z-index:-1}
 #pool video,#pool img{width:2px;height:2px}
@@ -321,6 +326,7 @@ select.tin{appearance:auto}
           <button class="chip done" id="mkDone">Fatto · 0</button>
         </div>
         <div class="missbar" id="missbar" hidden><div><b id="missTitle"></b><span id="missList"></span></div><button class="btn primary" id="missImp">Importa i file</button></div>
+        <div class="pastebar" id="pastebar" hidden><span id="pasteTxt"></span><button class="btn primary" id="pasteGo">Incolla qui</button><button class="btn x" id="pasteNo" aria-label="Svuota appunti">✕</button></div>
         <div class="hint" id="hint">Progetto vuoto. Apri la <b>Libreria</b> per importare video, foto e musica, oppure trascinali qui.</div>
       </section>
 
@@ -2064,6 +2070,7 @@ function renderInspector(){
       ${range('lop','Opacità',0.2,1,0.01,lg.opacity,pct)}
       <div class="row"><button class="btn" data-act="lrep">Cambia immagine</button><button class="btn danger" data-act="ldel">Rimuovi logo</button></div>`;
   }
+  if (o && sel && sel.type !== 'logo') h += `<div class="row"><button class="btn" data-act="copy1">Copia (⌘C)</button></div>`;
   insp.innerHTML = h;
   document.body.classList.toggle('has-sel', !!o);
   const h2 = insp.querySelector('h2');
@@ -2150,7 +2157,7 @@ insp.addEventListener('click', e => {
       renderTimeline(); requestDraw(); scheduleSave(); toast('Applicato alle clip selezionate'); return;
     }
     if (act === 'mcopy') copySel(false);
-    else if (act === 'mdup'){ copySel(false); pasteInternal(); }
+    else if (act === 'mdup'){ if (copySel(false)) pasteInternal(); }
     else if (act === 'mdel') deleteSel();
     return;
   }
@@ -2210,11 +2217,19 @@ insp.addEventListener('click', e => {
     case 'adel': deleteSel(); break;
     case 'lrep': $('#fileLogo').click(); break;
     case 'ldel': deleteSel(); break;
+    case 'copy1': copySel(false); break;
   }
 });
 
 /* ---------- copia, taglia, incolla ---------- */
-let clipBoard = null;
+let clipBoard = null, clipFiles = new Map();
+try { clipBoard = JSON.parse(localStorage.getItem('moviola:clip') || 'null'); } catch(e){}
+function updatePasteBar(){
+  const b = $('#pastebar'); if (!b) return;
+  const n = clipBoard ? clipBoard.clips.length + clipBoard.texts.length + clipBoard.audios.length : 0;
+  b.hidden = !n || !$('#scrim').hidden;
+  if (n) $('#pasteTxt').textContent = `${n} ${n === 1 ? 'elemento copiato' : 'elementi copiati'}${clipBoard.from && clipBoard.from !== P.name ? ' da ' + clipBoard.from : ''}`;
+}
 const CLIP_MARK = 'moviola-appunti:';
 function selItems(){
   const list = multi.length > 1 ? multi : sel && sel.type !== 'logo' ? [sel] : [];
@@ -2228,25 +2243,38 @@ function copySel(cut){
   const it = selItems(), n = it.clips.length + it.texts.length + it.audios.length;
   if (!n){ toast('Seleziona prima qualcosa nella timeline'); return false; }
   const starts = [...it.texts.map(x => x.start), ...it.audios.map(x => x.start)];
-  clipBoard = { id:uid(), clips:JSON.parse(JSON.stringify(it.clips)), texts:JSON.parse(JSON.stringify(it.texts)), audios:JSON.parse(JSON.stringify(it.audios)), t0: starts.length ? Math.min(...starts) : 0 };
+  clipBoard = { id:uid(), from:P.name || '', clips:JSON.parse(JSON.stringify(it.clips)), texts:JSON.parse(JSON.stringify(it.texts)), audios:JSON.parse(JSON.stringify(it.audios)), t0: starts.length ? Math.min(...starts) : 0, meta:{} };
+  // i file usati viaggiano con gli appunti: così si incollano anche in un altro progetto
+  clipFiles = new Map();
+  for (const x of [...it.clips, ...it.audios]){ const id = x.mediaId; if (!id) continue; const m = media.get(id); if (m && m.file) clipFiles.set(id, { file:m.file, type:m.type }); const mm = m ? { name:m.name, size:m.file ? m.file.size : 0, type:m.type, duration:m.duration || 0 } : (P.mediaMeta || {})[id]; if (mm) clipBoard.meta[id] = mm; }
+  try { localStorage.setItem('moviola:clip', JSON.stringify(clipBoard)); } catch(e){}
   try { navigator.clipboard.writeText(CLIP_MARK + clipBoard.id).catch(() => {}); } catch(e){}
+  updatePasteBar();
   if (cut){ deleteSel(); toast(`Tagliato: ${n} ${n === 1 ? 'elemento' : 'elementi'}`); }
   else toast(`Copiato: ${n} ${n === 1 ? 'elemento' : 'elementi'} · ⌘V per incollare sulla linea rossa`);
   return true;
 }
-function pasteInternal(){
+async function pasteInternal(){
   if (!clipBoard){ toast('Niente da incollare'); return; }
   pause(); snapshot(); P.example = false;
+  // porta nel progetto i file degli elementi copiati (da un altro progetto)
+  const need = new Set([...clipBoard.clips, ...clipBoard.audios].map(x => x.mediaId).filter(id => id && !media.has(id)));
+  for (const id of need){
+    const cf = clipFiles.get(id);
+    if (cf){ try { const m = cf.type === 'video' ? await loadVideo(cf.file, id) : cf.type === 'image' ? await loadImage(cf.file, id) : await loadAudio(cf.file, id); media.set(id, m); if (m.type === 'video') thumbQueue.push(m); continue; } catch(e){} }
+    P.mediaMeta = P.mediaMeta || {}; if (clipBoard.meta && clipBoard.meta[id]) P.mediaMeta[id] = clipBoard.meta[id];
+  }
   const newSel = [];
   if (clipBoard.clips.length){
     const idx = insertIndexAt(T);
-    const cs = clipBoard.clips.filter(c => !c.mediaId || media.has(c.mediaId)).map(c => ({ ...JSON.parse(JSON.stringify(c)), id:uid() }));
+    const cs = clipBoard.clips.map(c => ({ ...JSON.parse(JSON.stringify(c)), id:uid() }));
     P.clips.splice(idx, 0, ...cs); cs.forEach(c => { newSel.push({ type:'clip', id:c.id }); if (c.mediaId && !P.library.includes(c.mediaId)) P.library.push(c.mediaId); });
   }
   const dt = T - clipBoard.t0;
   clipBoard.texts.forEach(x => { const n = { ...JSON.parse(JSON.stringify(x)), id:uid(), start:x.start + dt, end:x.end + dt }; P.texts.push(n); newSel.push({ type:'text', id:n.id }); });
-  clipBoard.audios.filter(a => media.has(a.mediaId)).forEach(a => { const n = { ...JSON.parse(JSON.stringify(a)), id:uid(), start:Math.max(0, a.start + dt) }; P.audios.push(n); newSel.push({ type:'audio', id:n.id }); if (!P.library.includes(a.mediaId)) P.library.push(a.mediaId); });
+  clipBoard.audios.forEach(a => { const n = { ...JSON.parse(JSON.stringify(a)), id:uid(), start:Math.max(0, a.start + dt) }; P.audios.push(n); newSel.push({ type:'audio', id:n.id }); if (!P.library.includes(a.mediaId)) P.library.push(a.mediaId); });
   if (newSel.length > 1){ multi = newSel; sel = null; } else { multi = []; sel = newSel[0] || null; }
+  if (need.size){ await loadMissingMedia(); if (cloudReady) onCloudFiles(); }
   refresh(true); scheduleSave();
   toast(`Incollato alla linea rossa (${fmtT(T).replace(/\.\d+$/,'')})`);
 }
@@ -2528,6 +2556,8 @@ function openLibrary(highlight){
   });
 }
 $('#tMedia').onclick = () => setLibOpen(!document.body.classList.contains('lib-open'));
+$('#pasteGo').onclick = () => pasteInternal();
+$('#pasteNo').onclick = () => { clipBoard = null; clipFiles.clear(); try { localStorage.removeItem('moviola:clip'); } catch(e){} updatePasteBar(); };
 $('#fileMedia').onchange = e => { importFiles([...e.target.files]); e.target.value = ''; };
 $('#tLogo').onclick = () => { if (P.logo) select({ type:'logo', id:'logo' }); else $('#fileLogo').click(); };
 $('#fileLogo').onchange = async e => {
@@ -2783,6 +2813,7 @@ $('#missImp').onclick = () => {
 };
 function refresh(rebuild){
   $('#hint').hidden = !isEmptyProject(P);
+  updatePasteBar();
   updateMissing();
   renderLibrary();
   sizePreview();
@@ -3673,7 +3704,7 @@ async function openProjects(){
     delArmed = null; closeExport();
     clearMedia(); projectId = uid(); P = blankProject(); P.name = 'Progetto del ' + fmtDate(Date.now()); blankStart = false;
     sel = null; T = 0; undoStack.length = 0; $('#btnUndo').disabled = true;
-    refresh(true); await saveNow(); toast('Nuovo progetto creato: ora aggiungi i video con + Media');
+    refresh(true); await saveNow(); toast('Nuovo progetto creato: aggiungi i video dalla Libreria');
   };
   scrim.querySelector('.plist').addEventListener('click', async e => {
     const op = e.target.closest('[data-open]'), del = e.target.closest('[data-del]');
@@ -3702,7 +3733,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-06T10:31:13';
+const APP_BUILD = '2026-11-06T14:49:07';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
