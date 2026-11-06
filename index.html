@@ -193,6 +193,10 @@ body.lib-open .libstrip{display:flex}
 .libstrip::-webkit-scrollbar{display:none}
 .lcard{flex:0 0 auto;width:92px;display:flex;flex-direction:column;gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:5px;cursor:pointer;position:relative;text-align:left;min-width:0;color:var(--fg);font:inherit}
 .lcard.new{border-color:var(--accent)}
+.lcard.tgt{align-items:center;justify-content:center;gap:6px;font-family:var(--f-cond);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.04em;text-align:center}
+.lcard.tgt .sw2{display:flex;flex-direction:column;gap:3px;width:100%}
+.lcard.tgt .sw2 i{font-style:normal;border-radius:6px;padding:4px 0;border:1px solid var(--line);color:var(--muted)}
+.lcard.tgt .sw2 i.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .lcard.other{border-style:dashed;opacity:.92}
 .lcard .proj{font-size:9.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit;font-weight:500}
 .lsep{flex:0 0 auto;align-self:stretch;display:flex;align-items:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--f-cond);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-left:1px solid var(--line);padding:0 2px 0 6px}
@@ -1793,7 +1797,7 @@ function renderTimeline(){
     const bg = m && m.thumb ? `background-image:url('${m.thumb}')` : '';
     ovh += `<div class="bar over${isSel?' sel':''}" data-over="${ov.id}" style="top:${orowOf.get(ov.id)*(OH+GAP)}px;bottom:auto;height:${OH}px;line-height:${OH-4}px;left:${xOf(ov.start)}px;width:${Math.max(6, ovLen(ov)*pps-2)}px;${bg}"><span class="bname">⧉ ${esc(ov.name || 'Sopra')}</span><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
-  if (!ovh) ovh = `<div class="lane-empty" style="left:${X0}px;line-height:${OH}px">Sopra: trascina qui un video per sovrapporlo</div>`;
+  if (!ovh) ovh = `<div class="lane-empty" style="left:${X0}px;line-height:${OH}px">Sopra: in Libreria scegli «⧉ Sopra» e tocca un video, oppure trascinalo qui</div>`;
   $('#trO').innerHTML = ovh;
   $('#trV').style.cssText = `top:${topV}px;height:${VH}px`;
   $('#trT').style.cssText = `top:${topT}px;height:${nRows*(RH+GAP)}px`;
@@ -2645,6 +2649,7 @@ function insertIndexAt(t){
 function addFromLibrary(id, atT){
   if (atT != null) T = Math.max(0, atT);
   const m = media.get(id);
+  if (m && m.type !== 'audio' && atT == null && libTarget === 'over') return addOverlay(id, T);
   if (!m){ toast('Questo file va ricollegato: importalo di nuovo dalla Libreria', 4000); return; }
   pause(); snapshot(); P.example = false;
   if (m.type === 'audio'){
@@ -2666,6 +2671,8 @@ function addFromLibrary(id, atT){
   toast(m.type === 'audio' ? `Audio aggiunto da ${fmtT(T).replace(/\.\d+$/,'')}` : 'Aggiunto alla timeline');
 }
 let libNew = new Set();
+// dove va un elemento toccato nella libreria: traccia principale o traccia sopra
+let libTarget = 'main'; try { libTarget = localStorage.getItem('moviola:libTarget') === 'over' ? 'over' : 'main'; } catch(e){}
 // file degli altri progetti (e del cloud): compaiono in fondo alla libreria, un tocco e li porti qui
 let otherLib = [], otherTimer = 0;
 async function refreshOtherLib(){
@@ -2737,7 +2744,8 @@ function renderLibrary(fromOther){
     <div class="lib">${items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('') : '<p class="note">Vuota. Importa o trascina qui video, foto e canzoni.</p>'}</div>${others.length ? `<div class="libh">Da altri progetti · ${others.length}</div><div class="lib">${others.map(o => `<div class="litem">${oThumb(o)}<div class="linfo"><b>${esc(o.name)}</b><span>${oTxt(o)} · ${esc(o.from)}</span></div><button class="btn primary" data-other="${o.id}" aria-label="Porta in questo progetto">+</button></div>`).join('')}</div>` : ''}`;
   // striscia (telefono e schermi medi)
   const otherStrip = others.length ? `<div class="lsep">Altri progetti</div>` + others.map(o => `<button type="button" class="lcard other" data-other="${o.id}" aria-label="${esc(o.name)} da ${esc(o.from)}">${oThumb(o)}<b>${esc(o.name)}</b><span>${oTxt(o)}</span><span class="proj">${esc(o.from)}</span></button>`).join('') : '';
-  $('#libStrip').innerHTML = `<button class="lcard imp" data-imp="1">${ICO_PLUS}Importa</button>` + items.map(it =>
+  const tgtCard = `<button type="button" class="lcard tgt" data-tgt="1" aria-label="Dove aggiungere: ${libTarget === 'over' ? 'sopra' : 'sotto'}">Tocca e metti<span class="sw2"><i class="${libTarget === 'main' ? 'on' : ''}">Sotto</i><i class="${libTarget === 'over' ? 'on' : ''}">⧉ Sopra</i></span></button>`;
+  $('#libStrip').innerHTML = `<button class="lcard imp" data-imp="1">${ICO_PLUS}Importa</button>` + tgtCard + items.map(it =>
     `<div class="lcard${libNew.has(it.id) ? ' new' : ''}" data-lib="${it.id}" role="button" tabindex="0" aria-label="${esc(it.name)}">${thumbHTML(it)}<b>${esc(it.name)}</b><span>${durTxt(it)}</span>${usedInTimeline(it.id) ? '<i class="used" aria-hidden="true"></i>' : ''}</div>`).join('') + otherStrip;
   $('#tMedia').setAttribute('aria-pressed', document.body.classList.contains('lib-open'));
 }
@@ -2746,7 +2754,7 @@ function setLibOpen(on){ document.body.classList.toggle('lib-open', on); renderL
 // trascina dalla libreria alla timeline (mouse e dito); tocco semplice = aggiungi sulla linea rossa
 let libDrag = null;
 function libDown(e){
-  if (e.target.closest('[data-imp]')) return;   // il selettore file si apre al "click" (iPhone lo blocca se aperto da pointerdown)
+  if (e.target.closest('[data-imp]') || e.target.closest('[data-tgt]')) return;   // il selettore file si apre al "click" (iPhone lo blocca se aperto da pointerdown)
   const rm = e.target.closest('[data-rm]');
   if (rm){ if (!rm.disabled){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); renderLibrary(); } return; }
   const add = e.target.closest('[data-add]');
@@ -2795,7 +2803,8 @@ function libUp(e){
 ['libSide','libStrip'].forEach(id => {
   const el = $('#' + id);
   el.addEventListener('pointerdown', libDown);
-  el.addEventListener('click', e => { if (e.target.closest('[data-imp]')) $('#fileMedia').click(); const ot = e.target.closest('[data-other]'); if (ot) bringFromOther(ot.dataset.other); });
+  el.addEventListener('click', e => { if (e.target.closest('[data-imp]')) $('#fileMedia').click();
+    if (e.target.closest('[data-tgt]')){ libTarget = libTarget === 'over' ? 'main' : 'over'; try { localStorage.setItem('moviola:libTarget', libTarget); } catch(err){} renderLibrary(); toast(libTarget === 'over' ? 'Ora i video toccati vanno SOPRA, sulla linea rossa' : 'Ora i video toccati vanno nella traccia principale'); } const ot = e.target.closest('[data-other]'); if (ot) bringFromOther(ot.dataset.other); });
   el.addEventListener('pointermove', libMove, { passive:false });
   el.addEventListener('pointerup', libUp);
   el.addEventListener('pointercancel', libUp);
@@ -4062,7 +4071,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-06T18:44:32';
+const APP_BUILD = '2026-11-06T19:22:35';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
