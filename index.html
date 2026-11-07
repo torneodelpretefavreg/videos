@@ -130,7 +130,8 @@ body.theater .transport{position:fixed;left:0;right:0;bottom:0;z-index:61;backgr
 .sel>.h{display:block}
 .bar{position:absolute;top:0;bottom:0;box-sizing:border-box;border-radius:5px;border:2px solid transparent;cursor:pointer;font-family:var(--f-cond);font-weight:700;font-size:12px;padding:0 8px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bar.text{background:var(--text-bar);color:#1b1503}
-.bar.text.sel,.bar.audio.sel{touch-action:none}
+.bar.text.sel,.bar.audio.sel,.bar.over.sel{touch-action:none}
+.track.droptgt{outline:2px dashed var(--accent);outline-offset:1px;border-radius:6px;background:rgba(245,197,66,.10)}
 .bar.audio{background:color-mix(in srgb,var(--audio) 70%,#000);color:#e6fffb;background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.18) 0 2px,transparent 2px 5px);background-size:100% 40%;background-repeat:no-repeat;background-position:bottom}
 .bar .vseg{position:absolute;top:0;bottom:0;background:rgba(0,0,0,calc(.55 - var(--v)*.5));border-left:1px dashed rgba(255,255,255,.6);border-right:1px dashed rgba(255,255,255,.6);pointer-events:none}
 .bar .afade{position:absolute;top:0;bottom:0;pointer-events:none}
@@ -1080,7 +1081,8 @@ function audLen(a){
 }
 function audiosEnd(){ return P.audios.reduce((e,a) => Math.max(e, a.start + audLen(a)), 0); }
 // Durata: comandano le clip; senza clip valgono i brani audio; i testi possono allungarla
-function total(){ return Math.max(clipsDur() || audiosEnd(), P.texts.reduce((a,x) => Math.max(a, x.end), 0), overlaysEnd()); }
+// la timeline arriva fino all'ultimo elemento di qualsiasi traccia (anche musica o testi dopo l'ultimo video)
+function total(){ return Math.max(clipsDur(), audiosEnd(), P.texts.reduce((a,x) => Math.max(a, x.end), 0), overlaysEnd()); }
 function clipAt(t){
   const L = layout();
   for (const o of L) if (t >= o.start && t < o.start + o.len) return o;
@@ -1890,7 +1892,7 @@ inner.addEventListener('pointerdown', e => {
   if (ovEl0 && ovEl0.classList.contains('sel') && !multi.length && !(e.metaKey || e.ctrlKey || e.shiftKey)){
     const ov = P.overlays.find(x => x.id === ovEl0.dataset.over);
     pause();
-    drag = { kind:'over', side:h ? h.dataset.h : 'm', ov, x0:e.clientX, s0:ov.start, in0:ov.in, out0:ov.out, d0:ov.dur, snap:false, T0:T };
+    drag = { kind:'over', side:h ? h.dataset.h : 'm', ov, x0:e.clientX, y0:e.clientY, s0:ov.start, in0:ov.in, out0:ov.out, d0:ov.dur, snap:false, T0:T };
     inner.setPointerCapture(e.pointerId); e.preventDefault(); return;
   }
   if (ovEl0 && !(e.metaKey || e.ctrlKey || e.shiftKey)){ drag = { kind:'tap', x0:e.clientX, y0:e.clientY, ovEl:ovEl0, clientX:e.clientX }; return; }
@@ -1957,7 +1959,7 @@ inner.addEventListener('pointermove', e => {
   }
   if (drag.kind === 'clipmove'){
     if (!drag.moving){
-      if (Math.abs(e.clientX - drag.x0) < 6) return;
+      if (Math.abs(e.clientX - drag.x0) < 6 && Math.abs(e.clientY - drag.y0) < 12) return;
       drag.moving = true; pause(); snapshot();
       sel = { type:'clip', id:drag.c.id }; document.body.classList.add('clipdrag');
     }
@@ -1975,6 +1977,11 @@ inner.addEventListener('pointermove', e => {
       if (best != null) ts = Math.max(0, best);
     }
     P.clips = [...drag.order]; drag.order.forEach((x, k) => x.gap = drag.gaps[k]);
+    // trascinata in su, sulla traccia sopra: diventa una sovrapposizione
+    const orc = $('#trO').getBoundingClientRect();
+    drag.toOver = c.kind !== 'card' && e.clientY < orc.bottom + 2;
+    $('#trO').classList.toggle('droptgt', drag.toOver);
+    if (drag.toOver){ drag.ts = ts; showSnapLine(ts); renderTimeline(); return; }
     placeClip(c, ts, drag.base);
     showSnapLine(hit);
     renderTimeline();
@@ -1982,8 +1989,14 @@ inner.addEventListener('pointermove', e => {
   }
   if (drag.kind === 'over'){
     const d = (e.clientX - drag.x0)/pps, ov = drag.ov, m = media.get(ov.mediaId);
-    if (!drag.snap && Math.abs(e.clientX - drag.x0) > 3){ snapshot(); drag.snap = true; }
+    if (!drag.snap && (Math.abs(e.clientX - drag.x0) > 3 || (drag.side === 'm' && Math.abs(e.clientY - drag.y0) > 10))){ snapshot(); drag.snap = true; }
     if (!drag.snap) return;
+    if (drag.side === 'm'){
+      // trascinato in giù, sulla traccia principale: torna una clip normale
+      const vr = $('#trV').getBoundingClientRect();
+      drag.toMain = e.clientY > vr.top + 4;
+      $('#trV').classList.toggle('droptgt', drag.toMain);
+    }
     const ex = [drag.T0]; let hit = null;
     const len0 = ov.kind === 'video' ? drag.out0 - drag.in0 : drag.d0;
     if (drag.side === 'm'){ const r = snapRange(Math.max(0, drag.s0 + d), len0, ov, ex); ov.start = Math.max(0, r.s); hit = r.hit; T = ov.start + 0.02; }
@@ -2043,7 +2056,9 @@ function endDrag(e){
     select(hit);
     setT(t);
   } else if (d.kind === 'clipmove'){
-    document.body.classList.remove('clipdrag');
+    document.body.classList.remove('clipdrag'); $('#trO').classList.remove('droptgt');
+    if (d.moving && d.toOver && e.type === 'pointerup'){ showSnapLine(null); toOverlay(d.c, d.ts); return; }
+    if (d.moving && d.toOver){ P.clips = [...d.order]; d.order.forEach((x, k) => x.gap = d.gaps[k]); showSnapLine(null); renderTimeline(); return; }
     if (d.moving){
       showSnapLine(null);
       const o = layout().find(o => o.c === d.c); T = o ? o.start : T;
@@ -2051,7 +2066,8 @@ function endDrag(e){
     } else if (e.type === 'pointerup'){
       select({ type:'clip', id:d.c.id }); setT(tOf(e.clientX - inner.getBoundingClientRect().left));
     }
-  } else if (d.kind === 'trim' || d.kind === 'text' || d.kind === 'audio' || d.kind === 'over'){ renderTimeline(); renderInspector(); if (d.snap) scheduleSave(); }
+  } else if (d.kind === 'over' && d.toMain && e.type === 'pointerup'){ $('#trV').classList.remove('droptgt'); showSnapLine(null); fromOverlay(d.ov, true); }
+  else if (d.kind === 'trim' || d.kind === 'text' || d.kind === 'audio' || d.kind === 'over'){ $('#trV').classList.remove('droptgt'); renderTimeline(); renderInspector(); if (d.snap) scheduleSave(); }
 }
 inner.addEventListener('pointerup', endDrag);
 inner.addEventListener('pointercancel', endDrag);
@@ -2664,19 +2680,19 @@ function addCard(){
 /* ---------- libreria del progetto ---------- */
 const ICO_AUD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>';
 // traccia sopra: sposta una clip sopra (lasciando il suo posto vuoto) e viceversa
-function toOverlay(c){
+function toOverlay(c, at){
   const L = layout().find(x => x.c === c); if (!L || c.kind === 'card') return;
-  pause(); snapshot();
+  pause(); if (at == null) snapshot();
   const i = P.clips.indexOf(c), nx = P.clips[i+1];
   if (nx) nx.gap = Math.round(((nx.gap || 0) + (c.gap || 0) + L.len)*1000)/1000;
   P.clips.splice(i, 1);
-  const ov = { id:uid(), kind:c.kind, mediaId:c.mediaId, name:c.name, start:L.start, in:c.in || 0, out:c.out, dur:c.kind === 'image' ? c.dur : undefined, volume:0, mode:'pip', size:0.5, x:0.5, y:0.22, opacity:1, fadeIn:0, fadeOut:0, rot:c.rot || 0, border:true };
-  P.overlays.push(ov); sel = { type:'over', id:ov.id }; T = L.start + 0.02;
+  const ov = { id:uid(), kind:c.kind, mediaId:c.mediaId, name:c.name, start:at != null ? Math.max(0, at) : L.start, in:c.in || 0, out:c.out, dur:c.kind === 'image' ? c.dur : undefined, volume:0, mode:'pip', size:0.5, x:0.5, y:0.22, opacity:1, fadeIn:0, fadeOut:0, rot:c.rot || 0, border:true };
+  P.overlays.push(ov); sel = { type:'over', id:ov.id }; T = ov.start + 0.02;
   refresh(true); seekPreview(); scheduleSave();
   toast('Messo sopra: ora scegli riquadro o tutto schermo', 3500);
 }
-function fromOverlay(ov){
-  pause(); snapshot();
+function fromOverlay(ov, dragged){
+  pause(); if (!dragged) snapshot();
   const base = { id:uid(), mediaId:ov.mediaId, name:ov.name, fit:'cover', zoom:1, panX:0, panY:0, fadeIn:0, fadeOut:0, rot:ov.rot || 0, gap:0 };
   const c = ov.kind === 'video' ? { ...base, kind:'video', in:ov.in, out:ov.out, volume:ov.volume > 0 ? ov.volume : 1 } : { ...base, kind:'image', dur:ov.dur || 3 };
   P.overlays = P.overlays.filter(x => x !== ov);
@@ -4124,7 +4140,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-06T20:10:15';
+const APP_BUILD = '2026-11-07T01:06:07';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
