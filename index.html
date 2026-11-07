@@ -273,6 +273,30 @@ body.clipdrag .clip.sel{opacity:.9;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:
   .insp h2 .only-m{margin-left:auto}
   .sheet{max-height:88%}
 }
+/* ---- telefono in orizzontale: anteprima a sinistra, timeline e strumenti a destra ---- */
+@media (max-width:959px) and (orientation:landscape){
+  #app{padding-block:4px 2px;gap:4px}
+  .brand{font-size:17px}
+  .top .btn{min-height:30px;padding:4px 10px;font-size:13px}
+  .top .round{width:30px;height:30px}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);grid-template-rows:minmax(0,1fr) auto auto;gap:4px 8px;min-height:0}
+  .main{display:contents}
+  .stage{grid-column:1;grid-row:1 / 3;min-height:0}
+  .transport{grid-column:1;grid-row:3;gap:3px}
+  .transport .round{width:30px;height:30px}.transport .round.big{width:38px;height:38px}.transport .round svg{width:15px;height:15px}
+  #seek{height:20px}
+  .hgutter{display:none}
+  .tl-wrap{grid-column:2;grid-row:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+  .libstrip{grid-column:2;grid-row:2}
+  .libstrip .lcard{min-height:0;width:84px;padding:4px;gap:2px;font-size:11px}
+  .libstrip .lcard .lthumb{height:26px}
+  .libstrip .lcard.tgt .sw2 i{padding:2px 0}
+  .tools{grid-column:2;grid-row:3}
+  .tool{padding:5px 1px 4px;font-size:10px}.tool svg{width:16px;height:16px}
+  .insp{grid-column:2;grid-row:2 / 4;max-height:56vh}
+  body.has-sel .stage{min-height:0}
+  .hint{display:none}
+}
 .markbar{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:4;display:flex;gap:6px;background:rgba(10,12,16,.85);border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:6px;backdrop-filter:blur(6px);max-width:calc(100% - 16px)}
 .markbar .chip{min-height:38px;padding:4px 11px;white-space:nowrap}
 .markbar .chip.go{background:var(--rec);border-color:var(--rec)}
@@ -4307,7 +4331,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T02:34:27';
+const APP_BUILD = '2026-11-07T02:56:03';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
