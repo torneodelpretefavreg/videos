@@ -815,14 +815,17 @@ async function streamMedia(id, f){
 }
 // sul computer lo streaming serve solo per partire subito: il file intero si scarica in background e poi lo sostituisce
 const isDesktop = () => !window.matchMedia('(pointer: coarse)').matches && !/iPhone|iPad|Android/i.test(navigator.userAgent);
-const bgLoading = new Map();
+const bgLoading = new Map(), bgPromises = new Map();
+let exportBusy = false;
 function bgDownload(id, f){
-  if (bgLoading.has(id)) return;
+  if (bgPromises.has(id)) return bgPromises.get(id);
   bgLoading.set(id, 0);
-  cloudQueue(async () => {
+  const pr = cloudQueue(async () => {
     try {
       const blob = await driveDownload(f.driveId, p => bgLoading.set(id, p));
       const file = new File([blob], f.name, { type:f.mime || blob.type || 'video/mp4' });
+      // mai scambiare il file mentre un export lo sta leggendo
+      while (exportBusy) await new Promise(r => setTimeout(r, 500));
       const old = media.get(id); if (!old || !old.remote) return;
       const m2 = await loadVideo(file, id);
       pause();
@@ -833,8 +836,10 @@ function bgDownload(id, f){
       refresh(false); seekPreview(); runThumbs();
       toast(`${f.name} scaricato: ora scorre fluido`, 3000);
     } catch(e){ if (e.message !== 'drive-auth') toast('Download in background non riuscito: resta in streaming', 4000); }
-    finally { bgLoading.delete(id); }
+    finally { bgLoading.delete(id); bgPromises.delete(id); }
   });
+  bgPromises.set(id, pr);
+  return pr;
 }
 // dopo un nuovo accesso a Drive: i video in streaming che si erano fermati ripartono
 function revivStreams(){ for (const m of media.values()) if (m.remote && m.el.error){ const t = m.el.currentTime; m.el.src = m.url; try { m.el.load(); m.el.currentTime = t; } catch(e){} } }
@@ -3833,7 +3838,19 @@ async function addAudioRealtime(videoBlob, mix, W, H, fps, bitrate, onProg, sign
 }
 async function ensureMediaLoaded(onProg){
   if (projectLoading){ onProg({ phase:'Attendo il caricamento dei video…', p:0 }); try { await projectLoading; } catch(e){} }
-  const need = new Set(); P.clips.forEach(c => c.mediaId && need.add(c.mediaId)); P.audios.forEach(a => need.add(a.mediaId)); if (P.logo) need.add(P.logo.mediaId);
+  const need = new Set(); P.clips.forEach(c => c.mediaId && need.add(c.mediaId)); P.audios.forEach(a => need.add(a.mediaId)); (P.overlays || []).forEach(o => o.mediaId && need.add(o.mediaId)); if (P.logo) need.add(P.logo.mediaId);
+  // sul computer i video in streaming si scaricano interi prima dell'export: leggerli da internet fotogramma per fotogramma bloccava il video
+  if (isDesktop()){
+    for (const id of need){
+      const m = media.get(id), f = cloudFiles[id];
+      if (!m || !m.remote || !f) continue;
+      const pr = bgDownload(id, f);
+      const iv = setInterval(() => onProg({ phase:`Scarico ${m.name} da Drive… ${Math.round((bgLoading.get(id) || 0)*100)}%`, p:0 }), 400);
+      try { await pr; } finally { clearInterval(iv); }
+      const m2 = media.get(id);
+      if (m2 && m2.remote) throw new Error(`${m.name} è ancora su Drive e non sono riuscito a scaricarlo: ricollega Drive e riprova.`);
+    }
+  }
   const missing = [];
   for (const id of need){
     if (media.has(id)) continue;
@@ -3867,6 +3884,10 @@ async function verifyAudio(blob, mix){
 }
 async function exportVideo(opt, onProg, signal){
   await ensureMediaLoaded(onProg);
+  exportBusy = true;
+  try { return await exportVideoInner(opt, onProg, signal); } finally { exportBusy = false; }
+}
+async function exportVideoInner(opt, onProg, signal){
   if (!('VideoEncoder' in window)) throw new Error('Questo browser non può esportare video. Usa Chrome, Edge o Safari aggiornati.');
   if (!window.Mp4Muxer) throw new Error('Il modulo di esportazione MP4 non si è caricato. Controlla la connessione e ricarica la pagina.');
   const dur = total();
@@ -4256,7 +4277,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:39:09';
+const APP_BUILD = '2026-11-07T01:46:37';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
