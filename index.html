@@ -786,9 +786,33 @@ async function streamMedia(id, f){
     m.remote = true; media.set(id, m); thumbQueue.push(m);
     pendingRelink = pendingRelink.filter(p => p.id !== id);
     if (!P.library.includes(id) && usedMediaIds(P).has(id)) P.library.push(id);
-    toast(`${f.name}: lo guardi in streaming da Drive`, 3000);
+    if (isDesktop()){ toast(`${f.name}: parte subito in streaming, intanto lo scarico sul computer per farlo andare fluido`, 4500); bgDownload(id, f); }
+    else toast(`${f.name}: lo guardi in streaming da Drive`, 3000);
   } catch(e){ toast('Streaming da Drive non riuscito: ' + e.message, 5000); }
   finally { downloading.delete(id); refresh(false); runThumbs(); }
+}
+// sul computer lo streaming serve solo per partire subito: il file intero si scarica in background e poi lo sostituisce
+const isDesktop = () => !window.matchMedia('(pointer: coarse)').matches && !/iPhone|iPad|Android/i.test(navigator.userAgent);
+const bgLoading = new Map();
+function bgDownload(id, f){
+  if (bgLoading.has(id)) return;
+  bgLoading.set(id, 0);
+  cloudQueue(async () => {
+    try {
+      const blob = await driveDownload(f.driveId, p => bgLoading.set(id, p));
+      const file = new File([blob], f.name, { type:f.mime || blob.type || 'video/mp4' });
+      const old = media.get(id); if (!old || !old.remote) return;
+      const m2 = await loadVideo(file, id);
+      pause();
+      media.set(id, m2); thumbQueue.push(m2);
+      try { old.el.pause(); old.el.removeAttribute('src'); old.el.remove(); } catch(e){}
+      mp4Idx.delete(id); clipAudioCache.clear(); vInfoCache.delete(id);
+      storeFile(m2);
+      refresh(false); seekPreview(); runThumbs();
+      toast(`${f.name} scaricato: ora scorre fluido`, 3000);
+    } catch(e){ if (e.message !== 'drive-auth') toast('Download in background non riuscito: resta in streaming', 4000); }
+    finally { bgLoading.delete(id); }
+  });
 }
 // dopo un nuovo accesso a Drive: i video in streaming che si erano fermati ripartono
 function revivStreams(){ for (const m of media.values()) if (m.remote && m.el.error){ const t = m.el.currentTime; m.el.src = m.url; try { m.el.load(); m.el.currentTime = t; } catch(e){} } }
@@ -1563,7 +1587,7 @@ function loadVideo(file, fixedId){
   return new Promise((res, rej) => {
     const url = file.remote ? file.url : URL.createObjectURL(file);
     const el = document.createElement('video');
-    el.playsInline = true; el.setAttribute('playsinline',''); el.muted = true; el.preload = file.remote ? 'metadata' : 'auto'; el.crossOrigin = 'anonymous';
+    el.playsInline = true; el.setAttribute('playsinline',''); el.muted = true; el.preload = 'auto'; el.crossOrigin = 'anonymous';
     el.src = url; pool.appendChild(el);
     try { el.load(); } catch(e){}
     // Safari su iPhone a volte non legge il video finché non parte: lo avvio muto e lo fermo subito
@@ -4140,7 +4164,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:06:07';
+const APP_BUILD = '2026-11-07T01:15:53';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
