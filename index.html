@@ -3652,7 +3652,7 @@ const MP4V = {
       const stts = MP4A.child(moov, stbl, 'stts');
       { let t = 0, k = 0; for (let i = 0, n = moov.getUint32(stts.s + 4); i < n; i++){ const q = stts.s + 8 + i * 8, c = moov.getUint32(q), d = moov.getUint32(q + 4); for (let j = 0; j < c && k < N; j++){ dts[k++] = t; t += d; } } dts[N] = k ? dts[k - 1] + (k > 1 ? dts[k - 1] - dts[k - 2] : 1) : 0; }
       const ctts = MP4A.child(moov, stbl, 'ctts');
-      if (ctts){ const cv = moov.getUint8(ctts.s); let k = 0; for (let i = 0, n = moov.getUint32(ctts.s + 4); i < n; i++){ const q = ctts.s + 8 + i * 8, c = moov.getUint32(q), o = cv === 1 ? moov.getInt32(q + 4) : moov.getUint32(q + 4); for (let j = 0; j < c && k < N; j++) cts[k++] = o; } }
+      if (ctts){ const cv = moov.getUint8(ctts.s); let k = 0; for (let i = 0, n = moov.getUint32(ctts.s + 4); i < n; i++){ const q = ctts.s + 8 + i * 8, c = moov.getUint32(q), o = moov.getInt32(q + 4) /* con segno anche nella versione 0: l'iPhone e alcune app scrivono offset negativi */; for (let j = 0; j < c && k < N; j++) cts[k++] = o; } }
       const stss = MP4A.child(moov, stbl, 'stss');
       if (stss){ for (let i = 0, n = moov.getUint32(stss.s + 4); i < n; i++){ const s = moov.getUint32(stss.s + 8 + i * 4) - 1; if (s < N) sync[s] = 1; } } else sync.fill(1);
       // tempo di presentazione in secondi, già corretto dall'edit list
@@ -4307,7 +4307,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T02:28:19';
+const APP_BUILD = '2026-11-07T02:34:27';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
