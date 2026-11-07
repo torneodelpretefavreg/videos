@@ -831,7 +831,7 @@ function bgDownload(id, f){
       pause();
       media.set(id, m2); thumbQueue.push(m2);
       try { old.el.pause(); old.el.removeAttribute('src'); old.el.remove(); } catch(e){}
-      mp4Idx.delete(id); clipAudioCache.clear(); vInfoCache.delete(id);
+      mp4Idx.delete(id); clipAudioCache.clear(); vInfoCache.delete(id); decProbe.delete(id);
       storeFile(m2);
       refresh(false); seekPreview(); runThumbs();
       toast(`${f.name} scaricato: ora scorre fluido`, 3000);
@@ -3724,8 +3724,29 @@ async function vInfo(m){
   return vInfoCache.get(m.id);
 }
 let liveDec = null, liveDecClip = null, liveDecT = -1;
+// prova del decodificatore su questo file: due momenti a mezzo secondo di distanza devono dare fotogrammi diversi.
+// Se esce sempre lo stesso fotogramma (alcuni MP4 di app/telecamere) si usa la lettura compatibile: niente più video fermo.
+const decProbe = new Map();
+async function decoderWorks(m, info, t0){
+  if (decProbe.has(m.id)) return decProbe.get(m.id);
+  const pr = (async () => {
+    if (!m.duration || m.duration < 1) return true;
+    const a = clamp(t0, 0, Math.max(0, m.duration - 1.2)), b = a + 0.6;
+    const d = new ClipDecoder(m.file, info.idx);
+    try {
+      await d.open(info.cfg, a);
+      const f1 = await d.frameAt(a); const ts1 = f1 ? f1.timestamp : null;
+      const f2 = await d.frameAt(b); const ts2 = f2 ? f2.timestamp : null;
+      return ts1 != null && ts2 != null && Math.abs(ts2 - ts1) > 100000;   // almeno 0,1 s di differenza
+    } catch(e){ return false; }
+    finally { try { d.close(); } catch(e){} }
+  })();
+  decProbe.set(m.id, pr);
+  return pr;
+}
 async function liveFrameFor(c, srcT){
   const m = media.get(c.mediaId); const info = m && await vInfo(m); if (!info) return null;
+  if (!(await decoderWorks(m, info, srcT))){ vInfoCache.set(m.id, null); return null; }
   if (liveDecClip !== c || srcT < liveDecT - 1e-3){
     if (liveDec) liveDec.close();
     liveDec = new ClipDecoder(m.file, info.idx); await liveDec.open(info.cfg, srcT); liveDecClip = c;
@@ -3747,7 +3768,8 @@ async function prepareOverlays(t, useDec){
     if (!active){ if (d){ d.dec.close(); ovDecs.delete(ov.id); } continue; }
     const m = media.get(ov.mediaId); if (!m) continue;
     const srcT = Math.min(ov.in + (t - ov.start), ov.out - 1e-3);
-    const info = useDec ? await vInfo(m) : null;
+    let info = useDec ? await vInfo(m) : null;
+    if (info && !(await decoderWorks(m, info, srcT))){ vInfoCache.set(m.id, null); info = null; }
     if (info){
       try {
         if (!d || srcT < d.t - 1e-3){ if (d) d.dec.close(); d = { dec:new ClipDecoder(m.file, info.idx), t:srcT }; await d.dec.open(info.cfg, srcT); ovDecs.set(ov.id, d); }
@@ -4277,7 +4299,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:51:27';
+const APP_BUILD = '2026-11-07T01:58:01';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
