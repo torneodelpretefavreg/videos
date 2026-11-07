@@ -170,8 +170,26 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
 .stat span{font-size:12px;color:var(--muted)}
 
 .layout{display:flex;flex-direction:column;gap:10px}
+/* divisori trascinabili per ridimensionare i pannelli (come su Final Cut) */
+:root{--libW:270px;--inspW:330px;--pvCut:0px}
+.gutter{display:none}
+.hgutter{height:12px;margin:-4px 0;display:flex;align-items:center;justify-content:center;cursor:row-resize;touch-action:none;position:relative;z-index:3}
+.hgutter::before{content:"";width:46px;height:4px;border-radius:3px;background:var(--line);transition:background .15s}
+.hgutter:hover::before,.hgutter.on::before,.gutter:hover::before,.gutter.on::before{background:var(--accent)}
+body.resizing,body.resizing *{user-select:none;-webkit-user-select:none}
+body.resizing.rz-col,body.resizing.rz-col *{cursor:col-resize!important}
+body.resizing.rz-row,body.resizing.rz-row *{cursor:row-resize!important}
+#cv{max-height:max(22vh, calc(56vh - var(--pvCut)))}
+details.fold>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-family:var(--f-cond);font-weight:800;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 0}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::before{content:"▸";transition:transform .15s}
+details.fold[open]>summary::before{transform:rotate(90deg)}
+.lcard.othtgl{align-items:center;justify-content:center;text-align:center;font-family:var(--f-cond);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);border-style:dashed}
 @media (min-width:960px){
-  .layout{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 10px var(--inspW);gap:6px;align-items:start}
+  .gutter{display:flex;align-self:stretch;justify-content:center;align-items:center;cursor:col-resize;touch-action:none;min-height:200px}
+  .gutter::before{content:"";width:4px;height:46px;border-radius:3px;background:var(--line);position:sticky;top:45vh;transition:background .15s}
+  .gutter[data-gut="lib"]{display:none}
   .insp{position:sticky;top:calc(env(safe-area-inset-top,0px) + 8px);max-height:calc(100vh - 24px);overflow:auto}
 }
 /* libreria: pannello laterale fisso su schermi larghi, striscia sopra gli strumenti altrove */
@@ -180,7 +198,8 @@ textarea{width:100%;min-height:64px;resize:vertical;background:var(--bg);color:v
 body.lib-open .libstrip{display:flex}
 @media (min-width:1200px){
   #app{max-width:1600px}
-  .layout{grid-template-columns:270px minmax(0,1fr) 330px}
+  .layout{grid-template-columns:var(--libW) 10px minmax(0,1fr) 10px var(--inspW)}
+  .gutter[data-gut="lib"]{display:flex}
   .libside{display:flex;flex-direction:column;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 8px);max-height:calc(100vh - 24px);overflow:auto;min-width:0}
   body.lib-open .libstrip{display:none}
   #tMedia{display:none}
@@ -227,7 +246,7 @@ body.clipdrag .clip.sel{opacity:.9;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:
   .top .btn{min-height:36px;padding:6px 12px}
   .layout{flex:1;min-height:0}
   .main{flex:1;min-height:0;gap:6px}
-  .stage{flex:1 1 auto;min-height:150px;padding:0}
+  .stage{flex:1 1 auto;min-height:110px;padding:0}
   #cv{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);max-width:calc(100% - 12px);max-height:calc(100% - 12px)}
   .hint{font-size:12px;padding:6px 10px;bottom:8px}
   .transport{gap:6px}
@@ -323,6 +342,7 @@ body:has(#scrim:not([hidden])) .pastebar{display:none}
 
   <div class="layout">
     <aside class="libside" id="libSide" aria-label="Libreria"></aside>
+    <div class="gutter" data-gut="lib" title="Trascina per allargare o stringere la libreria (doppio clic: ripristina)"></div>
     <div class="main">
       <section class="stage">
         <canvas id="cv"></canvas>
@@ -353,6 +373,7 @@ body:has(#scrim:not([hidden])) .pastebar{display:none}
         <button class="round" id="btnEnd" aria-label="Vai alla fine"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.8 5H19v14h-2.2zM5 5v14l10.5-7z"/></svg></button>
       </div>
 
+      <div class="hgutter" id="gutTl" title="Trascina su o giù: timeline più grande o anteprima più grande (doppio clic: ripristina)"></div>
       <div class="tl-wrap">
         <div class="tl-scroll" id="tlScroll">
           <div class="tl-inner" id="tlInner">
@@ -379,6 +400,7 @@ body:has(#scrim:not([hidden])) .pastebar{display:none}
       </div>
     </div>
 
+    <div class="gutter" data-gut="insp" title="Trascina per allargare o stringere il pannello a destra (doppio clic: ripristina)"></div>
     <aside class="insp" id="insp" aria-label="Proprietà"></aside>
   </div>
 </div>
@@ -943,8 +965,8 @@ function cloudBlock(){
 }
 function cloudFilesList(){
   const files = Object.entries(cloudFiles).filter(([, f]) => f).sort((a, b) => (a[1].at || 0) - (b[1].at || 0));
-  return `<div class="grp">${files.length ? `<div class="lib">${files.map(([id, f]) => { const who = projectsUsing(id); return `<div class="litem"><div class="linfo"><b>${esc(f.name)}</b><span class="${who.length ? '' : 'warn'}">${fmtMB(f.backend === 'drive' ? f.size : f.size*4/3)} · ${f.backend === 'drive' ? 'Drive' : 'database'} · ${who.length ? esc(who.join(', ')) : 'non usato da nessun progetto'}${f.complete ? '' : ' · caricamento incompleto'}</span></div><button class="btn x" data-cdel="${id}" aria-label="Togli dal cloud">✕</button></div>`; }).join('')}</div>
-    <button class="btn" id="cloudClean">Libera spazio: togli i file non usati</button>` : '<p class="note">Nessun file nel cloud.</p>'}</div>`;
+  return `<div class="grp">${files.length ? `<details class="fold"><summary>File su Drive · ${files.length}</summary><div class="lib">${files.map(([id, f]) => { const who = projectsUsing(id); return `<div class="litem"><div class="linfo"><b>${esc(f.name)}</b><span class="${who.length ? '' : 'warn'}">${fmtMB(f.backend === 'drive' ? f.size : f.size*4/3)} · ${f.backend === 'drive' ? 'Drive' : 'database'} · ${who.length ? esc(who.join(', ')) : 'non usato da nessun progetto'}${f.complete ? '' : ' · caricamento incompleto'}</span></div><button class="btn x" data-cdel="${id}" aria-label="Togli dal cloud">✕</button></div>`; }).join('')}</div>
+    <button class="btn" id="cloudClean">Libera spazio: togli i file non usati</button></details>` : '<p class="note">Nessun file nel cloud.</p>'}</div>`;
 }
 function syncBlock(){
   if (typeof firebase === 'undefined') return '<p class="note">La sincronizzazione funziona nell’app pubblicata su GitHub.</p>';
@@ -1845,7 +1867,7 @@ function renderTimeline(){
   $('#trV').innerHTML = v;
   // texts: righe separate quando si sovrappongono
   const mob = window.matchMedia('(max-width:959px)').matches;
-  const VH = mob ? 46 : 56, RH = 24, GAP = 4;
+  const VH = Math.round((mob ? 46 : 56)*tlScale), RH = Math.round(24*Math.min(tlScale, 1.5)), GAP = 4;
   const rows = [], rowOf = new Map();
   [...P.texts].sort((a,b) => a.start - b.start).forEach(x => {
     let r = rows.findIndex(end => end <= x.start + 0.001);
@@ -1859,7 +1881,7 @@ function renderTimeline(){
     if (r < 0){ r = arows.length; arows.push(0); }
     arows[r] = a.start + audLen(a); arowOf.set(a.id, r);
   });
-  const nA = Math.max(1, arows.length), AH = 22;
+  const nA = Math.max(1, arows.length), AH = Math.round(22*Math.min(tlScale, 1.6));
   // traccia sopra: righe separate quando si sovrappongono
   const orows = [], orowOf = new Map();
   [...(P.overlays || [])].sort((a,b) => a.start - b.start).forEach(o => {
@@ -1867,7 +1889,7 @@ function renderTimeline(){
     if (r < 0){ r = orows.length; orows.push(0); }
     orows[r] = o.start + ovLen(o); orowOf.set(o.id, r);
   });
-  const OH = (P.overlays || []).length ? (mob ? 30 : 34) : 20, nO = Math.max(1, orows.length);
+  const OH = (P.overlays || []).length ? Math.round((mob ? 30 : 34)*tlScale) : 20, nO = Math.max(1, orows.length);
   const topO = 28, topV = topO + nO*(OH+GAP) + 2, topT = topV + VH + 6, topA = topT + nRows*(RH+GAP) + 2;
   $('#trO').style.cssText = `top:${topO}px;height:${nO*(OH+GAP)}px`;
   let ovh = '';
@@ -2102,6 +2124,44 @@ const PPS_MAX = 240;
 const ppsMin = () => Math.min(40, Math.max(0.02, (scroller.clientWidth - X0 - 40) / Math.max(total(), 5)));
 const ppsFromSlider = v => ppsMin() * Math.pow(PPS_MAX/ppsMin(), v/100);
 const sliderFromPps = p => clamp(100*Math.log(p/ppsMin())/Math.log(PPS_MAX/ppsMin()), 0, 100);
+// ---------- pannelli ridimensionabili ----------
+let tlScale = 1, layoutPrefs = {};
+try { layoutPrefs = JSON.parse(localStorage.getItem('moviola:layout') || '{}') || {}; } catch(e){}
+function applyLayout(){
+  const r = document.documentElement.style, L = layoutPrefs;
+  if (L.libW) r.setProperty('--libW', L.libW + 'px'); else r.removeProperty('--libW');
+  if (L.inspW) r.setProperty('--inspW', L.inspW + 'px'); else r.removeProperty('--inspW');
+  tlScale = Math.min(L.tl || 1, window.matchMedia('(max-width:959px)').matches ? 1.45 : 2.4);   // sul telefono non oltre, altrimenti gli strumenti escono dallo schermo
+  r.setProperty('--pvCut', Math.round((tlScale - 1)*240) + 'px');
+}
+function saveLayout(){ try { localStorage.setItem('moviola:layout', JSON.stringify(layoutPrefs)); } catch(e){} }
+applyLayout();
+function startResize(e, kind){
+  e.preventDefault();
+  const g = e.currentTarget; g.setPointerCapture(e.pointerId); g.classList.add('on');
+  document.body.classList.add('resizing', kind === 'tl' ? 'rz-row' : 'rz-col');
+  const x0 = e.clientX, y0 = e.clientY;
+  const lib0 = $('#libSide').getBoundingClientRect().width, insp0 = $('#insp').getBoundingClientRect().width, tl0 = tlScale;
+  const mv = ev => {
+    if (kind === 'lib') layoutPrefs.libW = Math.round(clamp(lib0 + ev.clientX - x0, 190, 520));
+    else if (kind === 'insp') layoutPrefs.inspW = Math.round(clamp(insp0 - (ev.clientX - x0), 260, 560));
+    else layoutPrefs.tl = Math.round(clamp(tl0 - (ev.clientY - y0)/160, 0.7, window.matchMedia('(max-width:959px)').matches ? 1.45 : 2.4)*100)/100;
+    applyLayout();
+    if (kind === 'tl') renderTimeline();
+  };
+  const up = () => {
+    g.removeEventListener('pointermove', mv); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up);
+    g.classList.remove('on'); document.body.classList.remove('resizing', 'rz-row', 'rz-col');
+    saveLayout(); renderTimeline(); draw();
+  };
+  g.addEventListener('pointermove', mv); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up);
+}
+document.querySelectorAll('.gutter').forEach(g => {
+  g.addEventListener('pointerdown', e => startResize(e, g.dataset.gut));
+  g.addEventListener('dblclick', () => { delete layoutPrefs[g.dataset.gut === 'lib' ? 'libW' : 'inspW']; applyLayout(); saveLayout(); renderTimeline(); });
+});
+$('#gutTl').addEventListener('pointerdown', e => startResize(e, 'tl'));
+$('#gutTl').addEventListener('dblclick', () => { delete layoutPrefs.tl; applyLayout(); saveLayout(); renderTimeline(); });
 // zoom fluido: tanti eventi nello stesso fotogramma = un solo ridisegno della timeline
 let zoomRaf = 0, zoomAnchor = null;
 function zoomTo(newPps, tAt, mx){
@@ -2775,7 +2835,9 @@ let libNew = new Set();
 // dove va un elemento toccato nella libreria: traccia principale o traccia sopra
 let libTarget = 'main'; try { libTarget = localStorage.getItem('moviola:libTarget') === 'over' ? 'over' : 'main'; } catch(e){}
 // file degli altri progetti (e del cloud): compaiono in fondo alla libreria, un tocco e li porti qui
-let otherLib = [], otherTimer = 0;
+let otherLib = [], otherTimer = 0, showOthers = false;
+try { showOthers = localStorage.getItem('moviola:showOthers') === '1'; } catch(e){}
+function setShowOthers(v){ showOthers = v; try { localStorage.setItem('moviola:showOthers', v ? '1' : '0'); } catch(e){} }
 async function refreshOtherLib(){
   let recs = []; try { recs = await dbGetAll('projects'); } catch(e){}
   recs = recs.filter(r => r.id !== projectId && !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated);
@@ -2842,9 +2904,10 @@ function renderLibrary(fromOther){
   $('#libSide').innerHTML = `<h2>Libreria</h2>
     <button class="btn primary" data-imp="1">Importa file</button>
     <p class="note">Trascina un elemento sulla timeline nel punto che vuoi, oppure tocca + per metterlo sulla linea rossa.</p>
-    <div class="lib">${items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('') : '<p class="note">Vuota. Importa o trascina qui video, foto e canzoni.</p>'}</div>${others.length ? `<div class="libh">Da altri progetti · ${others.length}</div><div class="lib">${others.map(o => `<div class="litem">${oThumb(o)}<div class="linfo"><b>${esc(o.name)}</b><span>${oTxt(o)} · ${esc(o.from)}</span></div><button class="btn primary" data-other="${o.id}" aria-label="Porta in questo progetto">+</button></div>`).join('')}</div>` : ''}`;
+    <div class="lib">${items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('') : '<p class="note">Vuota. Importa o trascina qui video, foto e canzoni.</p>'}</div>${others.length ? `<details class="fold" id="othFold"${showOthers ? ' open' : ''}><summary>File di altri progetti · ${others.length}</summary><div class="lib">${others.map(o => `<div class="litem">${oThumb(o)}<div class="linfo"><b>${esc(o.name)}</b><span>${oTxt(o)} · ${esc(o.from)}</span></div><button class="btn primary" data-other="${o.id}" aria-label="Porta in questo progetto">+</button></div>`).join('')}</div></details>` : ''}`;
+  const of = $('#othFold'); if (of) of.addEventListener('toggle', () => setShowOthers(of.open));
   // striscia (telefono e schermi medi)
-  const otherStrip = others.length ? `<div class="lsep">Altri progetti</div>` + others.map(o => `<button type="button" class="lcard other" data-other="${o.id}" aria-label="${esc(o.name)} da ${esc(o.from)}">${oThumb(o)}<b>${esc(o.name)}</b><span>${oTxt(o)}</span><span class="proj">${esc(o.from)}</span></button>`).join('') : '';
+  const otherStrip = !others.length ? '' : `<button type="button" class="lcard othtgl" data-othtgl="1">${showOthers ? '◂ Nascondi' : 'Altri progetti'}<br>${others.length} file${showOthers ? '' : ' ▸'}</button>` + (!showOthers ? '' : others.map(o => `<button type="button" class="lcard other" data-other="${o.id}" aria-label="${esc(o.name)} da ${esc(o.from)}">${oThumb(o)}<b>${esc(o.name)}</b><span>${oTxt(o)}</span><span class="proj">${esc(o.from)}</span></button>`).join(''));
   const tgtCard = `<button type="button" class="lcard tgt" data-tgt="1" aria-label="Dove aggiungere: ${libTarget === 'over' ? 'sopra' : 'sotto'}">Tocca e metti<span class="sw2"><i class="${libTarget === 'main' ? 'on' : ''}">Sotto</i><i class="${libTarget === 'over' ? 'on' : ''}">⧉ Sopra</i></span></button>`;
   $('#libStrip').innerHTML = `<button class="lcard imp" data-imp="1">${ICO_PLUS}Importa</button>` + tgtCard + items.map(it =>
     `<div class="lcard${libNew.has(it.id) ? ' new' : ''}" data-lib="${it.id}" role="button" tabindex="0" aria-label="${esc(it.name)}">${thumbHTML(it)}<b>${esc(it.name)}</b><span>${durTxt(it)}</span>${usedInTimeline(it.id) ? '<i class="used" aria-hidden="true"></i>' : ''}</div>`).join('') + otherStrip;
@@ -2855,7 +2918,7 @@ function setLibOpen(on){ document.body.classList.toggle('lib-open', on); renderL
 // trascina dalla libreria alla timeline (mouse e dito); tocco semplice = aggiungi sulla linea rossa
 let libDrag = null;
 function libDown(e){
-  if (e.target.closest('[data-imp]') || e.target.closest('[data-tgt]')) return;   // il selettore file si apre al "click" (iPhone lo blocca se aperto da pointerdown)
+  if (e.target.closest('[data-imp]') || e.target.closest('[data-tgt]') || e.target.closest('[data-othtgl]')) return;   // il selettore file si apre al "click" (iPhone lo blocca se aperto da pointerdown)
   const rm = e.target.closest('[data-rm]');
   if (rm){ if (!rm.disabled){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); renderLibrary(); } return; }
   const add = e.target.closest('[data-add]');
@@ -2905,6 +2968,7 @@ function libUp(e){
   const el = $('#' + id);
   el.addEventListener('pointerdown', libDown);
   el.addEventListener('click', e => { if (e.target.closest('[data-imp]')) $('#fileMedia').click();
+    if (e.target.closest('[data-othtgl]')){ setShowOthers(!showOthers); renderLibrary(true); }
     if (e.target.closest('[data-tgt]')){ libTarget = libTarget === 'over' ? 'main' : 'over'; try { localStorage.setItem('moviola:libTarget', libTarget); } catch(err){} renderLibrary(); toast(libTarget === 'over' ? 'Ora i video toccati vanno SOPRA, sulla linea rossa' : 'Ora i video toccati vanno nella traccia principale'); } const ot = e.target.closest('[data-other]'); if (ot) bringFromOther(ot.dataset.other); });
   el.addEventListener('pointermove', libMove, { passive:false });
   el.addEventListener('pointerup', libUp);
@@ -4172,7 +4236,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:26:02';
+const APP_BUILD = '2026-11-07T01:34:20';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
