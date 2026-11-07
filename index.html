@@ -1720,7 +1720,7 @@ function tick(now){
   const vm = cur && cur.c.kind === 'video' && activeClipId === cur.c.id ? media.get(cur.c.mediaId) : null;
   if (vm){
     const el = vm.el, c = cur.c;
-    if (el.ended || el.currentTime >= c.out - 0.02) T = cur.start + cur.len + 0.001;
+    if (el.ended || el.currentTime >= c.out - 0.02) T = cur.start + cur.len + 0.005;   // oltre la tolleranza di clipAt: altrimenti dopo l'ultima clip il tempo restava bloccato
     else if (!el.paused && !el.seeking && el.readyState >= 2) T = Math.max(T, cur.start + (el.currentTime - c.in)/spd(c));
     clock = { t0:now, p0:T };
   } else T = clock.p0 + (now - clock.t0)/1000*rate;
@@ -4172,7 +4172,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:24:31';
+const APP_BUILD = '2026-11-07T01:26:02';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
