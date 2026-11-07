@@ -2140,7 +2140,7 @@ function scrubTo(e){ const rect = inner.getBoundingClientRect(); setT(tOf(e.clie
 
 // zoom logaritmico: tutto a sinistra = intero progetto visibile, tutto a destra = dettaglio
 const PPS_MAX = 240;
-const ppsMin = () => Math.min(40, Math.max(0.02, (scroller.clientWidth - X0 - 40) / Math.max(total(), 5)));
+const ppsMin = () => Math.min(40, Math.max(0.02, (scroller.clientWidth - X0 - 130) / Math.max(total(), 5)));   // a zoom minimo entra tutta: niente scorrimento residuo
 const ppsFromSlider = v => ppsMin() * Math.pow(PPS_MAX/ppsMin(), v/100);
 const sliderFromPps = p => clamp(100*Math.log(p/ppsMin())/Math.log(PPS_MAX/ppsMin()), 0, 100);
 // ---------- pannelli ridimensionabili ----------
@@ -4277,7 +4277,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:46:37';
+const APP_BUILD = '2026-11-07T01:51:27';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
