@@ -3730,14 +3730,21 @@ const decProbe = new Map();
 async function decoderWorks(m, info, t0){
   if (decProbe.has(m.id)) return decProbe.get(m.id);
   const pr = (async () => {
+    // HEVC a 10 bit (video HDR dell'iPhone): nel browser spesso non si disegna, meglio la lettura compatibile
+    if (/^(hvc1|hev1)\.2\./.test(info.idx.codec || '')) return false;
     if (!m.duration || m.duration < 1) return true;
     const a = clamp(t0, 0, Math.max(0, m.duration - 1.2)), b = a + 0.6;
     const d = new ClipDecoder(m.file, info.idx);
     try {
       await d.open(info.cfg, a);
-      const f1 = await d.frameAt(a); const ts1 = f1 ? f1.timestamp : null;
-      const f2 = await d.frameAt(b); const ts2 = f2 ? f2.timestamp : null;
-      return ts1 != null && ts2 != null && Math.abs(ts2 - ts1) > 100000;   // almeno 0,1 s di differenza
+      // oltre ai tempi controllo che i fotogrammi si disegnino davvero e siano diversi
+      // (alcuni video dell'iPhone in HDR a 10 bit si decodificano ma nel browser non si disegnano: restava il fotogramma fermo)
+      const pc = document.createElement('canvas'); pc.width = 48; pc.height = 27;
+      const pg = pc.getContext('2d', { willReadFrequently:true });
+      const sig = fr => { try { pg.clearRect(0, 0, 48, 27); pg.drawImage(fr, 0, 0, 48, 27); const px = pg.getImageData(0, 0, 48, 27).data; let h = 0, vis = 0; for (let i = 0; i < px.length; i += 4){ h = (h*31 + px[i] + px[i+1]*7 + px[i+2]*13) | 0; if (px[i+3]) vis++; } return vis ? h : null; } catch(e){ return null; } };
+      const f1 = await d.frameAt(a); const ts1 = f1 ? f1.timestamp : null, s1 = f1 ? sig(f1) : null;
+      const f2 = await d.frameAt(b); const ts2 = f2 ? f2.timestamp : null, s2 = f2 ? sig(f2) : null;
+      return ts1 != null && ts2 != null && Math.abs(ts2 - ts1) > 100000 && s1 != null && s2 != null && s1 !== s2;
     } catch(e){ return false; }
     finally { try { d.close(); } catch(e){} }
   })();
@@ -4299,7 +4306,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:58:01';
+const APP_BUILD = '2026-11-07T02:18:56';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
