@@ -1821,6 +1821,18 @@ function updateTime(){
 const X0 = 14;
 const xOf = t => X0 + t*pps;
 const tOf = x => (x - X0)/pps;
+// posizioni in timeline legate alla variabile CSS --pps: lo zoom cambia solo quella, senza ridisegnare tutto
+const LX = t => `calc(${X0}px + ${Math.round(t*1e4)/1e4} * var(--pps) * 1px)`;
+const LW = (len, minus, min) => `max(${min}px, calc(${Math.round(len*1e4)/1e4} * var(--pps) * 1px - ${minus}px))`;
+// anteprime come blob: indirizzi corti invece di lunghe stringhe base64 ripetute in ogni clip
+function thumbUrl(m){
+  if (!m || !m.thumb) return '';
+  if (!m.thumb.startsWith('data:')) return m.thumb;
+  if (!m._tu || m._tuSrc !== m.thumb){
+    try { const [h, b64] = m.thumb.split(','), bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); if (m._tu) URL.revokeObjectURL(m._tu); m._tu = URL.createObjectURL(new Blob([u], { type:(h.match(/data:([^;]+)/) || [])[1] || 'image/jpeg' })); m._tuSrc = m.thumb; } catch(e){ return m.thumb; }
+  }
+  return m._tu;
+}
 const inner = $('#tlInner'), scroller = $('#tlScroll');
 function placePlayhead(){ $('#ph').style.left = xOf(T) + 'px'; }
 function followPlayhead(){
@@ -1829,13 +1841,7 @@ function followPlayhead(){
   else if (x < l) scroller.scrollLeft = Math.max(0, x - 60);
 }
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function renderTimeline(){
-  const tot = total();
-  pps = clamp(pps, ppsMin(), PPS_MAX);
-  const zs = $('#zoom'); if (document.activeElement !== zs) zs.value = sliderFromPps(pps);
-  const width = Math.max(scroller.clientWidth, xOf(Math.max(tot, audiosEnd(), 5)) + 120);
-  inner.style.width = width + 'px';
-  // ruler
+function renderRuler(width){
   const steps = [0.5,1,2,5,10,15,30,60,120,300,600,900,1800];
   const step = steps.find(s => s*pps >= 54) || 1800;
   let r = '';
@@ -1845,23 +1851,31 @@ function renderTimeline(){
     if (step*pps >= 90) r += `<div class="tick minor" style="left:${xOf(t+step/2)}px"></div>`;
   }
   $('#ruler').innerHTML = r;
+}
+function renderTimeline(){
+  const tot = total();
+  pps = clamp(pps, ppsMin(), PPS_MAX);
+  const zs = $('#zoom'); if (document.activeElement !== zs) zs.value = sliderFromPps(pps);
+  const width = Math.max(scroller.clientWidth, xOf(Math.max(tot, audiosEnd(), 5)) + 120);
+  inner.style.width = width + 'px'; inner.style.setProperty('--pps', pps);
+  renderRuler(width);
   // clips
   let v = '';
   for (const o of layout()){
     const c = o.c, isSel = (sel && sel.type === 'clip' && sel.id === c.id) || inMulti('clip', c.id);
     const m = c.mediaId ? media.get(c.mediaId) : null;
-    let bg = c.kind === 'card' ? `background:${c.color}` : (m && m.thumb ? `background-image:url('${m.thumb}')` : '');
+    let bg = c.kind === 'card' ? `background:${c.color}` : (m && m.thumb ? `background-image:url('${thumbUrl(m)}')` : '');
     const name = c.kind === 'card' ? 'Cartello' : (c.name || 'Clip');
     const fx = (c.fadeIn ? '◢ ' : '') + (c.fadeOut ? '◣' : '') + (spd(c) !== 1 ? ' ' + String(spd(c)).replace('.', ',') + '×' : '') + (c.look && c.look !== 'none' ? ' ◐' : '') + (c.motion && c.motion !== 'none' ? ' ⤢' : '');
-    v += `<div class="clip${isSel?' sel':''}" data-clip="${c.id}" style="left:${xOf(o.start)}px;width:${Math.max(4,o.len*pps-2)}px;${bg}">
+    v += `<div class="clip${isSel?' sel':''}" data-clip="${c.id}" style="left:${LX(o.start)};width:${LW(o.len, 2, 4)};${bg}">
       <div class="lbl">${esc(name)}</div>${o.len*pps > 54 ? `<div class="dur">${fmtS(o.len)}</div>` : ''}${fx && o.len*pps > 80 ? `<div class="fx">${fx}</div>` : ''}
       <div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
   const LL = layout();
-  LL.forEach(o => { if (o.c.gap > 0.01) v += `<div class="gapzone" style="left:${xOf(o.start - o.c.gap)}px;width:${Math.max(2, o.c.gap*pps - 2)}px"></div>`; });
+  LL.forEach(o => { if (o.c.gap > 0.01) v += `<div class="gapzone" style="left:${LX(o.start - o.c.gap)};width:${LW(o.c.gap, 2, 2)}"></div>`; });
   for (let i = 0; i < LL.length - 1; i++){
     const tr = LL[i].c.trans; if (!tr || tr.type === 'none' || LL[i+1].c.gap > 0.01) continue;
-    v += `<div class="tmark" data-clip="${LL[i].c.id}" style="left:${xOf(LL[i].start + LL[i].len)}px" title="${esc((TRANS.find(x => x[0] === tr.type) || ['', ''])[1])}"></div>`;
+    v += `<div class="tmark" data-clip="${LL[i].c.id}" style="left:${LX(LL[i].start + LL[i].len)}" title="${esc((TRANS.find(x => x[0] === tr.type) || ['', ''])[1])}"></div>`;
   }
   if (!P.clips.length) v = `<div class="lane-empty" style="left:${X0}px">Nessuna clip: apri la Libreria</div>`;
   $('#trV').innerHTML = v;
@@ -1895,8 +1909,8 @@ function renderTimeline(){
   let ovh = '';
   for (const ov of P.overlays || []){
     const isSel = sel && sel.type === 'over' && sel.id === ov.id, m = media.get(ov.mediaId);
-    const bg = m && m.thumb ? `background-image:url('${m.thumb}')` : '';
-    ovh += `<div class="bar over${isSel?' sel':''}" data-over="${ov.id}" style="top:${orowOf.get(ov.id)*(OH+GAP)}px;bottom:auto;height:${OH}px;line-height:${OH-4}px;left:${xOf(ov.start)}px;width:${Math.max(6, ovLen(ov)*pps-2)}px;${bg}"><span class="bname">⧉ ${esc(ov.name || 'Sopra')}</span><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
+    const bg = m && m.thumb ? `background-image:url('${thumbUrl(m)}')` : '';
+    ovh += `<div class="bar over${isSel?' sel':''}" data-over="${ov.id}" style="top:${orowOf.get(ov.id)*(OH+GAP)}px;bottom:auto;height:${OH}px;line-height:${OH-4}px;left:${LX(ov.start)};width:${LW(ovLen(ov), 2, 6)};${bg}"><span class="bname">⧉ ${esc(ov.name || 'Sopra')}</span><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
   if (!ovh) ovh = `<div class="lane-empty" style="left:${X0}px;line-height:${OH}px">Sopra: in Libreria scegli «⧉ Sopra» e tocca un video, oppure trascinalo qui</div>`;
   $('#trO').innerHTML = ovh;
@@ -1907,7 +1921,7 @@ function renderTimeline(){
   let tx = '';
   for (const x of P.texts){
     const isSel = (sel && sel.type === 'text' && sel.id === x.id) || inMulti('text', x.id);
-    tx += `<div class="bar text${isSel?' sel':''}" data-text="${x.id}" style="top:${rowOf.get(x.id)*(RH+GAP)}px;bottom:auto;height:${RH}px;left:${xOf(x.start)}px;width:${Math.max(6,(x.end-x.start)*pps-2)}px">${esc(x.text.split('\n')[0])}<div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
+    tx += `<div class="bar text${isSel?' sel':''}" data-text="${x.id}" style="top:${rowOf.get(x.id)*(RH+GAP)}px;bottom:auto;height:${RH}px;left:${LX(x.start)};width:${LW(x.end-x.start, 2, 6)}">${esc(x.text.split('\n')[0])}<div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
   if (!P.texts.length) tx = `<div class="lane-empty" style="left:${X0}px">Testi</div>`;
   $('#trT').innerHTML = tx;
@@ -1915,9 +1929,9 @@ function renderTimeline(){
   let a = '';
   for (const au of P.audios){
     const isSel = (sel && sel.type === 'audio' && sel.id === au.id) || inMulti('audio', au.id);
-    const segs = (au.vsegs || []).map(sg => `<i class="vseg" style="left:${sg.a*pps}px;width:${Math.max(2,(sg.b-sg.a)*pps)}px;--v:${Math.min(1, sg.v)}"></i>`).join('');
-    const fades = (au.fadeIn ? `<i class="afade in" style="width:${au.fadeIn*pps}px"></i>` : '') + (au.fadeOut ? `<i class="afade out" style="width:${au.fadeOut*pps}px"></i>` : '');
-    a += `<div class="bar audio${isSel?' sel':''}" data-audio="${au.id}" style="top:${arowOf.get(au.id)*(AH+GAP)}px;bottom:auto;height:${AH}px;left:${xOf(au.start)}px;width:${Math.max(6,audLen(au)*pps-2)}px">${segs}${fades}<span class="bname">♪ ${esc(au.name || 'Audio')}</span><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
+    const segs = (au.vsegs || []).map(sg => `<i class="vseg" style="left:${LW(sg.a, 0, 0)};width:${LW(sg.b-sg.a, 0, 2)};--v:${Math.min(1, sg.v)}"></i>`).join('');
+    const fades = (au.fadeIn ? `<i class="afade in" style="width:${LW(au.fadeIn, 0, 0)}"></i>` : '') + (au.fadeOut ? `<i class="afade out" style="width:${LW(au.fadeOut, 0, 0)}"></i>` : '');
+    a += `<div class="bar audio${isSel?' sel':''}" data-audio="${au.id}" style="top:${arowOf.get(au.id)*(AH+GAP)}px;bottom:auto;height:${AH}px;left:${LX(au.start)};width:${LW(audLen(au), 2, 6)}">${segs}${fades}<span class="bname">♪ ${esc(au.name || 'Audio')}</span><div class="h l" data-h="l"></div><div class="h r" data-h="r"></div></div>`;
   }
   if (!P.audios.length) a = `<div class="lane-empty" style="left:${X0}px">Audio</div>`;
   prefetchFrames();
@@ -2163,14 +2177,20 @@ document.querySelectorAll('.gutter').forEach(g => {
 $('#gutTl').addEventListener('pointerdown', e => startResize(e, 'tl'));
 $('#gutTl').addEventListener('dblclick', () => { delete layoutPrefs.tl; applyLayout(); saveLayout(); renderTimeline(); });
 // zoom fluido: tanti eventi nello stesso fotogramma = un solo ridisegno della timeline
-let zoomRaf = 0, zoomAnchor = null;
+let zoomRaf = 0, zoomAnchor = null, zoomFull = 0;
 function zoomTo(newPps, tAt, mx){
   pps = clamp(newPps, ppsMin(), PPS_MAX);
   zoomAnchor = { tAt, mx };
   if (zoomRaf) return;
   zoomRaf = requestAnimationFrame(() => {
-    zoomRaf = 0; renderTimeline();
+    zoomRaf = 0;
+    // veloce: cambio solo la scala (--pps), il righello e la larghezza; il ridisegno completo arriva quando ti fermi
+    const width = Math.max(scroller.clientWidth, xOf(Math.max(total(), 5)) + 120);
+    inner.style.width = width + 'px'; inner.style.setProperty('--pps', pps);
+    renderRuler(width); placePlayhead();
+    const zs = $('#zoom'); if (document.activeElement !== zs) zs.value = sliderFromPps(pps);
     if (zoomAnchor) scroller.scrollLeft = xOf(zoomAnchor.tAt) - zoomAnchor.mx;
+    clearTimeout(zoomFull); zoomFull = setTimeout(() => { const sl = scroller.scrollLeft; renderTimeline(); scroller.scrollLeft = sl; }, 220);
   });
 }
 $('#zoom').addEventListener('input', e => {
@@ -2883,7 +2903,7 @@ function libItems(){
     return p ? { id, m:null, type:p.type, name:p.name, dur:0 } : null;
   }).filter(Boolean);
 }
-const thumbHTML = it => it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${it.m.thumb}')` : ''}"></div>`;
+const thumbHTML = it => it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${thumbUrl(it.m)}')` : ''}"></div>`;
 const cloudTxt = id => uploading.has(id) ? ` · ☁ ${Math.round(uploading.get(id)*100)}%` : downloading.has(id) ? ` · ⬇ ${Math.round(downloading.get(id)*100)}%` : (cloudFiles[id] && cloudFiles[id].complete) ? ' · ☁' : '';
 const durTxt = it => (!it.m ? (downloading.has(it.id) ? 'scarico dal cloud' : 'da ricollegare') : it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'')) + cloudTxt(it.id);
 const ICO_PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
@@ -2986,7 +3006,7 @@ function openLibrary(highlight){
   }).filter(Boolean);
   const groups = [['video','Video'],['image','Foto'],['audio','Audio']];
   const row = it => {
-    const th = it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${it.m.thumb}')` : ''}"></div>`;
+    const th = it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${thumbUrl(it.m)}')` : ''}"></div>`;
     const used = usedInTimeline(it.id);
     const info = !it.m ? '<span class="warn">Da ricollegare: importalo di nuovo</span>'
       : `<span>${it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'')}${used ? ' · in timeline' : ''}</span>`;
@@ -4236,7 +4256,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:34:20';
+const APP_BUILD = '2026-11-07T01:39:09';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
