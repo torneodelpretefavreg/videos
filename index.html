@@ -2102,10 +2102,20 @@ const PPS_MAX = 240;
 const ppsMin = () => Math.min(40, Math.max(0.02, (scroller.clientWidth - X0 - 40) / Math.max(total(), 5)));
 const ppsFromSlider = v => ppsMin() * Math.pow(PPS_MAX/ppsMin(), v/100);
 const sliderFromPps = p => clamp(100*Math.log(p/ppsMin())/Math.log(PPS_MAX/ppsMin()), 0, 100);
+// zoom fluido: tanti eventi nello stesso fotogramma = un solo ridisegno della timeline
+let zoomRaf = 0, zoomAnchor = null;
+function zoomTo(newPps, tAt, mx){
+  pps = clamp(newPps, ppsMin(), PPS_MAX);
+  zoomAnchor = { tAt, mx };
+  if (zoomRaf) return;
+  zoomRaf = requestAnimationFrame(() => {
+    zoomRaf = 0; renderTimeline();
+    if (zoomAnchor) scroller.scrollLeft = xOf(zoomAnchor.tAt) - zoomAnchor.mx;
+  });
+}
 $('#zoom').addEventListener('input', e => {
-  const center = tOf(scroller.scrollLeft + scroller.clientWidth/2);
-  pps = ppsFromSlider(+e.target.value); renderTimeline();
-  scroller.scrollLeft = xOf(center) - scroller.clientWidth/2;
+  const center = zoomAnchor && zoomRaf ? zoomAnchor.tAt : tOf(scroller.scrollLeft + scroller.clientWidth/2);
+  zoomTo(ppsFromSlider(+e.target.value), center, scroller.clientWidth/2);
 });
 // pizzico con due dita sulla timeline = zoom (cambia solo la vista, non il video)
 let pinch = null;
@@ -2120,23 +2130,21 @@ scroller.addEventListener('touchstart', e => {
 scroller.addEventListener('touchmove', e => {
   if (!pinch || e.touches.length !== 2) return;
   e.preventDefault();
-  pps = clamp(pinch.pps0 * Math.pow(tDist(e) / pinch.d0, 2.2), ppsMin(), PPS_MAX);
-  renderTimeline();
-  scroller.scrollLeft = xOf(pinch.tAt) - pinch.mx;
+  zoomTo(pinch.pps0 * Math.pow(tDist(e) / pinch.d0, 2.6), pinch.tAt, pinch.mx);
 }, { passive:false });
 scroller.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
 // Mac: pizzico sul trackpad (arriva come rotella con ctrl), ⌘/⌥ + rotella, gesti di Safari
 function zoomAround(newPps, clientX){
   const rect = scroller.getBoundingClientRect(), mx = clientX != null ? clientX - rect.left : scroller.clientWidth/2;
-  const tAt = tOf(scroller.scrollLeft + mx);
-  pps = clamp(newPps, ppsMin(), PPS_MAX); renderTimeline();
-  scroller.scrollLeft = xOf(tAt) - mx;
+  // durante una raffica di eventi tengo fermo il punto sotto al cursore (la timeline non è ancora ridisegnata)
+  const tAt = zoomRaf && zoomAnchor ? zoomAnchor.tAt : tOf(scroller.scrollLeft + mx);
+  zoomTo(newPps, tAt, mx);
 }
 $('.tl-wrap').addEventListener('wheel', e => {
   if (e.ctrlKey || e.metaKey || e.altKey){
     e.preventDefault();
     // pizzico sul trackpad (delta piccoli) molto sensibile; rotella del mouse a scatti più ampi
-    const k = Math.abs(e.deltaY) < 20 ? 0.045 : 0.02;
+    const k = Math.abs(e.deltaY) < 20 ? 0.06 : 0.028;
     zoomAround(pps * Math.exp(-clamp(e.deltaY, -60, 60) * k), e.clientX);
   }
   else if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && !e.shiftKey && e.target.closest('.tl-scroll')){ e.preventDefault(); scroller.scrollLeft += e.deltaY; }
@@ -4164,7 +4172,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T01:15:53';
+const APP_BUILD = '2026-11-07T01:24:31';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
