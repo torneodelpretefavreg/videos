@@ -497,7 +497,7 @@ const undoStack = [];
 function snapshot(){ undoStack.push(JSON.stringify(P)); if (undoStack.length > 80) undoStack.shift(); $('#btnUndo').disabled = false; scheduleSave(); }
 
 /* ---------- database locale (IndexedDB) ---------- */
-let dbp = null;
+let dbp = null, dbConn = null;
 function openDB(){
   if (dbp) return dbp;
   dbp = new Promise((res, rej) => {
@@ -509,14 +509,19 @@ function openDB(){
       if (!d.objectStoreNames.contains('projects')) d.createObjectStore('projects', { keyPath:'id' });
       if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath:'id' });
     };
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-    r.onblocked = () => rej(new Error('blocked'));
+    r.onsuccess = () => {
+      const d = r.result;
+      // iPhone chiude il database quando l'app va in secondo piano o c'è poca memoria: alla prossima operazione si riapre
+      d.onclose = () => { if (dbConn === d){ dbConn = null; dbp = null; } };
+      d.onversionchange = () => { try { d.close(); } catch(e){} if (dbConn === d){ dbConn = null; dbp = null; } };
+      dbConn = d; dbOK = true; res(d);
+    };
+    r.onerror = () => { dbp = null; rej(r.error); };
+    r.onblocked = () => { dbp = null; rej(new Error('blocked')); };
   });
   return dbp;
 }
-async function idb(store, mode, fn){
-  const d = await openDB();
+function idbOnce(d, store, mode, fn){
   return new Promise((res, rej) => {
     const tx = d.transaction(store, mode), st = tx.objectStore(store);
     let out; const q = fn(st);
@@ -525,6 +530,22 @@ async function idb(store, mode, fn){
     tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error || new Error('abort'));
   });
 }
+async function idb(store, mode, fn){
+  for (let k = 0; ; k++){
+    const d = await openDB();
+    try { return await idbOnce(d, store, mode, fn); }
+    catch(e){
+      // "The database connection is closing" (Safari): connessione persa, la riapro e riprovo
+      const lost = e && (e.name === 'InvalidStateError' || /closing|closed|connection/i.test(e.message || '') || e.name === 'UnknownError');
+      if (!lost || k >= 2) throw e;
+      try { d.close(); } catch(err){}
+      if (dbConn === d){ dbConn = null; dbp = null; }
+      await new Promise(r => setTimeout(r, 150*(k+1)));
+    }
+  }
+}
+// tornando sull'app (dopo lo schermo bloccato o un'altra app) controllo che il database sia ancora utilizzabile
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') openDB().then(() => { dbOK = true; }).catch(() => {}); });
 const dbGetAll = store => idb(store, 'readonly', s => s.getAll());
 const dbGet = (store, key) => idb(store, 'readonly', s => s.get(key));
 const dbPut = (store, val) => idb(store, 'readwrite', s => s.put(val));
@@ -4308,7 +4329,7 @@ async function openProjects(){
   pause();
   await saveNow();
   let list = [];
-  try { list = (await dbGetAll('projects')).filter(r => !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated); } catch(e){ dbOK = false; }
+  try { list = (await dbGetAll('projects')).filter(r => !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated); } catch(e){ dbp = null; dbConn = null; try { list = (await dbGetAll('projects')).filter(r => !isDeletedId(r.id)).sort((a,b) => b.updated - a.updated); } catch(e2){ dbOK = false; } }
   let usage = '';
   try { const est = await navigator.storage.estimate(); if (est && est.usage != null) usage = `Spazio usato sul dispositivo: ${(est.usage/1048576).toFixed(0)} MB`; } catch(e){}
   scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="pjT">
@@ -4366,7 +4387,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T23:48:21';
+const APP_BUILD = '2026-11-08T00:01:16';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
