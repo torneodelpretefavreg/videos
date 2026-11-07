@@ -217,6 +217,22 @@ body.lib-open .libstrip{display:flex}
 .lcard.tgt .sw2{display:flex;flex-direction:column;gap:3px;width:100%}
 .lcard.tgt .sw2 i{font-style:normal;border-radius:6px;padding:4px 0;border:1px solid var(--line);color:var(--muted)}
 .lcard.tgt .sw2 i.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.libsheet{max-width:820px;height:min(92vh,900px);display:flex;flex-direction:column;gap:10px}
+@media (max-width:639px){.libsheet{height:94vh;height:94dvh}}
+.lshead{display:flex;align-items:center;gap:8px}.lshead h3{flex:1}
+.lstabs{display:flex}.lstabs button{flex:1}
+.lsbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.lsfil{flex:1 1 auto;min-width:0;overflow-x:auto}.lsbar .seg button{white-space:nowrap}
+.ggrid{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;align-content:start;padding-bottom:8px;-webkit-overflow-scrolling:touch}
+@media (max-width:639px){.ggrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.gcard{position:relative;display:flex;flex-direction:column;gap:3px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:6px;cursor:pointer;min-width:0}
+.gcard:active{transform:scale(.98)}.gcard.new{border-color:var(--accent)}.gcard.used{box-shadow:inset 0 0 0 1px rgba(245,197,66,.45)}
+.gcard b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gcard span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gthumb{aspect-ratio:16/10;border-radius:8px;background:#0b0f16 center/cover no-repeat;position:relative;display:flex;align-items:center;justify-content:center}
+.gthumb.aud svg{width:34px;height:34px;color:#4fd1b5}
+.gdur{position:absolute;right:5px;bottom:5px;background:rgba(0,0,0,.7);color:#fff!important;font-family:var(--f-cond);font-weight:800;font-size:11px;padding:1px 5px;border-radius:5px}
+.gx{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:12px;cursor:pointer}
+.lcard.big{align-items:center;justify-content:center;text-align:center;font-family:var(--f-cond);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.04em;gap:4px}
+.lcard.big svg{width:22px;height:22px;color:var(--accent)}
 .lcard.other{border-style:dashed;opacity:.92}
 .lcard .proj{font-size:9.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:inherit;font-weight:500}
 .lsep{flex:0 0 auto;align-self:stretch;display:flex;align-items:center;writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--f-cond);font-weight:800;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-left:1px solid var(--line);padding:0 2px 0 6px}
@@ -2958,7 +2974,8 @@ function renderLibrary(fromOther){
   // striscia (telefono e schermi medi)
   const otherStrip = !others.length ? '' : `<button type="button" class="lcard othtgl" data-othtgl="1">${showOthers ? '◂ Nascondi' : 'Altri progetti'}<br>${others.length} file${showOthers ? '' : ' ▸'}</button>` + (!showOthers ? '' : others.map(o => `<button type="button" class="lcard other" data-other="${o.id}" aria-label="${esc(o.name)} da ${esc(o.from)}">${oThumb(o)}<b>${esc(o.name)}</b><span>${oTxt(o)}</span><span class="proj">${esc(o.from)}</span></button>`).join(''));
   const tgtCard = `<button type="button" class="lcard tgt" data-tgt="1" aria-label="Dove aggiungere: ${libTarget === 'over' ? 'sopra' : 'sotto'}">Tocca e metti<span class="sw2"><i class="${libTarget === 'main' ? 'on' : ''}">Sotto</i><i class="${libTarget === 'over' ? 'on' : ''}">⧉ Sopra</i></span></button>`;
-  $('#libStrip').innerHTML = `<button class="lcard imp" data-imp="1">${ICO_PLUS}Importa</button>` + tgtCard + items.map(it =>
+  const bigCard = `<button type="button" class="lcard big" data-big="1" aria-label="Apri la libreria a schermo intero"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Apri<br>tutto</button>`;
+  $('#libStrip').innerHTML = `<button class="lcard imp" data-imp="1">${ICO_PLUS}Importa</button>` + bigCard + tgtCard + items.map(it =>
     `<div class="lcard${libNew.has(it.id) ? ' new' : ''}" data-lib="${it.id}" role="button" tabindex="0" aria-label="${esc(it.name)}">${thumbHTML(it)}<b>${esc(it.name)}</b><span>${durTxt(it)}</span>${usedInTimeline(it.id) ? '<i class="used" aria-hidden="true"></i>' : ''}</div>`).join('') + otherStrip;
   $('#tMedia').setAttribute('aria-pressed', document.body.classList.contains('lib-open'));
 }
@@ -2967,7 +2984,7 @@ function setLibOpen(on){ document.body.classList.toggle('lib-open', on); renderL
 // trascina dalla libreria alla timeline (mouse e dito); tocco semplice = aggiungi sulla linea rossa
 let libDrag = null;
 function libDown(e){
-  if (e.target.closest('[data-imp]') || e.target.closest('[data-tgt]') || e.target.closest('[data-othtgl]')) return;   // il selettore file si apre al "click" (iPhone lo blocca se aperto da pointerdown)
+  if (e.target.closest('[data-imp]') || e.target.closest('[data-tgt]') || e.target.closest('[data-othtgl]') || e.target.closest('[data-big]')) return;   // il selettore file si apre al "click" (iPhone lo blocca se aperto da pointerdown)
   const rm = e.target.closest('[data-rm]');
   if (rm){ if (!rm.disabled){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); renderLibrary(); } return; }
   const add = e.target.closest('[data-add]');
@@ -3018,47 +3035,65 @@ function libUp(e){
   el.addEventListener('pointerdown', libDown);
   el.addEventListener('click', e => { if (e.target.closest('[data-imp]')) $('#fileMedia').click();
     if (e.target.closest('[data-othtgl]')){ setShowOthers(!showOthers); renderLibrary(true); }
+    if (e.target.closest('[data-big]')){ libTab = 'here'; openLibrary(); }
     if (e.target.closest('[data-tgt]')){ libTarget = libTarget === 'over' ? 'main' : 'over'; try { localStorage.setItem('moviola:libTarget', libTarget); } catch(err){} renderLibrary(); toast(libTarget === 'over' ? 'Ora i video toccati vanno SOPRA, sulla linea rossa' : 'Ora i video toccati vanno nella traccia principale'); } const ot = e.target.closest('[data-other]'); if (ot) bringFromOther(ot.dataset.other); });
   el.addEventListener('pointermove', libMove, { passive:false });
   el.addEventListener('pointerup', libUp);
   el.addEventListener('pointercancel', libUp);
   el.addEventListener('keydown', e => { const c = e.target.closest('[data-lib]'); if (c && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); addFromLibrary(c.dataset.lib); } });
 });
+// libreria a schermo intero (comoda dal telefono): anteprime grandi, filtri, sotto/sopra, altri progetti
+let libTab = 'here', libFilter = 'all';
 function openLibrary(highlight){
   pause();
   const hl = new Set(highlight || []);
   const items = P.library.map(id => {
     const m = media.get(id);
     if (m) return { id, m, type:m.type, name:m.name, dur:m.duration };
-    const p = pendingRelink.find(x => x.id === id);
-    return p ? { id, m:null, type:p.type, name:p.name, dur:0 } : null;
+    const p = pendingRelink.find(x => x.id === id) || (P.mediaMeta || {})[id];
+    return p ? { id, m:null, type:p.type, name:p.name, dur:p.duration || 0 } : null;
   }).filter(Boolean);
-  const groups = [['video','Video'],['image','Foto'],['audio','Audio']];
-  const row = it => {
-    const th = it.type === 'audio' ? `<div class="lthumb">${ICO_AUD}</div>` : `<div class="lthumb" style="${it.m && it.m.thumb ? `background-image:url('${thumbUrl(it.m)}')` : ''}"></div>`;
-    const used = usedInTimeline(it.id);
-    const info = !it.m ? '<span class="warn">Da ricollegare: importalo di nuovo</span>'
-      : `<span>${it.type === 'image' ? 'Foto' : fmtT(it.dur).replace(/\.\d+$/,'')}${used ? ' · in timeline' : ''}</span>`;
-    return `<div class="litem${hl.has(it.id) ? ' new' : ''}">${th}<div class="linfo"><b>${esc(it.name)}</b>${info}</div>
-      <button class="btn primary" data-add="${it.id}" ${it.m ? '' : 'disabled'}>Aggiungi</button>
-      <button class="btn x" data-rm="${it.id}" aria-label="Togli dalla libreria" ${used ? 'disabled title="È in timeline"' : ''}>✕</button></div>`;
+  const others = otherLib.filter(o => !P.library.includes(o.id));
+  const list = libTab === 'here' ? items : others.map(o => ({ id:o.id, m:media.get(o.id) || null, type:o.type, name:o.name, dur:o.duration, from:o.from, here:o.here, cloud:o.cloud, other:true }));
+  const shown = list.filter(x => libFilter === 'all' || x.type === libFilter);
+  const cnt = t => list.filter(x => t === 'all' || x.type === t).length;
+  const durTxt = it => it.type === 'image' ? 'Foto' : it.dur ? fmtT(it.dur).replace(/\.\d+$/,'') : it.type === 'audio' ? 'Audio' : 'Video';
+  const card = it => {
+    const used = !it.other && usedInTimeline(it.id);
+    const th = it.type === 'audio' ? `<div class="gthumb aud">${ICO_AUD}</div>` : `<div class="gthumb" style="${it.m && it.m.thumb ? `background-image:url('${thumbUrl(it.m)}')` : ''}">${it.type === 'image' ? '' : `<span class="gdur">${durTxt(it)}</span>`}</div>`;
+    const sub = it.other ? `${esc(it.from)}${it.here ? '' : it.cloud ? ' · ☁ Drive' : ' · non qui'}` : !it.m ? '<span class="warn">da ricollegare</span>' : used ? '● in timeline' : (it.type === 'audio' ? durTxt(it) : it.type === 'image' ? 'Foto' : '');
+    return `<div class="gcard${hl.has(it.id) ? ' new' : ''}${used ? ' used' : ''}" data-g="${it.id}" data-o="${it.other ? 1 : ''}" role="button" tabindex="0">${th}<b>${esc(it.name)}</b><span>${sub}</span>${!it.other && !used ? `<button class="gx" data-rm="${it.id}" aria-label="Togli dalla libreria">✕</button>` : ''}</div>`;
   };
-  const body = items.length ? groups.map(([t,l]) => { const g = items.filter(x => x.type === t); return g.length ? `<div class="libh">${l} · ${g.length}</div>${g.map(row).join('')}` : ''; }).join('')
-    : '<p class="note">La libreria è vuota. Importa video, foto e canzoni: restano qui e li aggiungi alla timeline quando vuoi.</p>';
-  scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="libT">
-    <h3 id="libT">Libreria</h3>
-    <div class="row"><button class="btn primary" id="libImp">Importa file</button></div>
-    <p class="note">Puoi anche trascinare i file sulla finestra. <b>Aggiungi</b> mette l’elemento nel punto della linea rossa (${fmtT(T).replace(/\.\d+$/,'')}).</p>
-    <div class="lib">${body}</div>
-    <div class="row"><button class="btn" id="libClose">Chiudi</button></div>
+  const empty = libTab === 'here' ? 'La libreria di questo progetto è vuota. Premi <b>Importa</b> per aggiungere video, foto e canzoni.' : 'Negli altri progetti non ci sono file da portare qui.';
+  scrim.innerHTML = `<div class="sheet libsheet" role="dialog" aria-modal="true" aria-labelledby="libT">
+    <div class="lshead"><h3 id="libT">Libreria</h3><button class="btn primary" id="libImp">+ Importa</button><button class="btn" id="libClose">Chiudi</button></div>
+    <div class="seg lstabs" data-seg="ltab"><button data-v="here" aria-pressed="${libTab === 'here' ? 'true' : 'false'}">Questo progetto · ${items.length}</button><button data-v="other" aria-pressed="${libTab === 'other' ? 'true' : 'false'}">Altri progetti · ${others.length}</button></div>
+    <div class="lsbar">
+      <div class="seg lsfil" data-seg="lfil">${[['all','Tutto'],['video','Video'],['image','Foto'],['audio','Audio']].map(([v,l]) => `<button data-v="${v}" aria-pressed="${libFilter === v ? 'true' : 'false'}">${l} ${cnt(v)}</button>`).join('')}</div>
+      <div class="seg lstgt" data-seg="ltgt"><button data-v="main" aria-pressed="${libTarget === 'main' ? 'true' : 'false'}">Sotto</button><button data-v="over" aria-pressed="${libTarget === 'over' ? 'true' : 'false'}">⧉ Sopra</button></div>
+    </div>
+    <p class="note">Tocca un elemento: va in timeline sulla linea rossa (${fmtT(T).replace(/\.\d+$/,'')})${libTarget === 'over' ? ', nella traccia <b>sopra</b>' : ''}.</p>
+    <div class="ggrid">${shown.length ? shown.map(card).join('') : `<p class="note">${empty}</p>`}</div>
   </div>`;
   scrim.hidden = false;
   $('#libImp').onclick = () => $('#fileMedia').click();
   $('#libClose').onclick = closeExport;
-  scrim.querySelector('.lib').addEventListener('click', e => {
-    const add = e.target.closest('[data-add]'), rm = e.target.closest('[data-rm]');
-    if (add){ closeExport(); addFromLibrary(add.dataset.add); }
-    else if (rm){ snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); openLibrary(); }
+  const sh = scrim.querySelector('.libsheet');
+  sh.addEventListener('click', e => {
+    const sb = e.target.closest('[data-seg] button');
+    if (sb){
+      const k = sb.parentElement.dataset.seg, v = sb.dataset.v;
+      if (k === 'ltab') libTab = v; else if (k === 'lfil') libFilter = v;
+      else if (k === 'ltgt'){ libTarget = v; try { localStorage.setItem('moviola:libTarget', v); } catch(err){} renderLibrary(true); }
+      openLibrary(); return;
+    }
+    const rm = e.target.closest('[data-rm]');
+    if (rm){ e.stopPropagation(); snapshot(); P.library = P.library.filter(x => x !== rm.dataset.rm); scheduleSave(); renderLibrary(); openLibrary(); return; }
+    const g = e.target.closest('[data-g]'); if (!g) return;
+    const id = g.dataset.g;
+    if (g.dataset.o){ closeExport(); bringFromOther(id); return; }
+    if (!media.has(id)){ toast('Questo file non è su questo dispositivo: premi Importa e sceglilo, si ricollega da solo', 5000); return; }
+    closeExport(); addFromLibrary(id);
   });
 }
 $('#tMedia').onclick = () => setLibOpen(!document.body.classList.contains('lib-open'));
@@ -4331,7 +4366,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-07T02:56:03';
+const APP_BUILD = '2026-11-07T23:48:21';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
