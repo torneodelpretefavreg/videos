@@ -310,8 +310,11 @@ body.clipdrag .clip.sel{opacity:.9;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:
   .hgutter{display:none}
   body.has-sel .hgutter,body.lib-open .hgutter{display:flex;grid-column:3;grid-row:2;margin:0;height:16px}
   .hgutter::before{width:54px;height:5px}
-  .tl-wrap{grid-column:3;grid-row:1;min-height:0;overflow-y:auto;overflow-x:hidden}
-  .tl-wrap{overscroll-behavior:contain;scrollbar-width:thin}
+  /* la timeline scorre in tutte e due le direzioni dentro un solo riquadro (scorrimento nativo: su iPhone quello fatto a mano non partiva) */
+  .tl-wrap{grid-column:3;grid-row:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:4px 0 2px}
+  .tl-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+  .ruler{position:sticky;top:0;left:auto;right:auto;width:100%;margin-bottom:-22px;z-index:4;background:var(--panel)}
+  .zoomrow{display:none}
   .libstrip{grid-column:3;grid-row:3;min-height:0;align-self:start}
   .libstrip .lcard{min-height:0;width:84px;padding:4px;gap:2px;font-size:11px}
   .libstrip .lcard .lthumb{height:26px}
@@ -4500,7 +4503,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T10:20:59';
+const APP_BUILD = '2026-11-13T13:19:50';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
