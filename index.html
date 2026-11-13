@@ -4313,12 +4313,18 @@ async function runExport(){
   $('#xStop').onclick = () => { abortCtl.abort(); };
   let wake = null; try { wake = await navigator.wakeLock?.request('screen'); } catch(e){}
   try {
+    // diario dell'export: se Safari chiude la pagina a metà, alla riapertura si vede dove si era fermato
+    const xlog = { at:Date.now(), res:exportOpt.res, fps:exportOpt.fps, dur:Math.round(total()), phase:'avvio', p:0 }; let xlogT = 0;
+    const xsave = () => { try { localStorage.setItem('moviola:xlog', JSON.stringify(xlog)); } catch(e){} };
+    xsave();
     const r = await exportVideo(exportOpt, ({ phase, p, eta }) => {
+      xlog.phase = phase; xlog.p = p || 0; if (Date.now() - xlogT > 700){ xlogT = Date.now(); xsave(); }
       $('#xphase').textContent = phase;
       $('#xbar').style.width = Math.round((p||0)*100) + '%';
       $('#xeta').textContent = eta != null && isFinite(eta) ? `ancora ${Math.ceil(eta)} s` : '';
     }, abortCtl.signal);
     abortCtl = null;
+    try { localStorage.removeItem('moviola:xlog'); } catch(e){}
     if (lastUrl) URL.revokeObjectURL(lastUrl);
     lastUrl = URL.createObjectURL(r.blob);
     const mb = (r.blob.size/1048576).toFixed(1).replace('.',',');
@@ -4333,6 +4339,7 @@ async function runExport(){
     $('#xSave').onclick = () => saveVideo(r.blob, name);
   } catch(err){
     abortCtl = null;
+    try { localStorage.removeItem('moviola:xlog'); } catch(e){}
     if (err && err.name === 'AbortError'){ closeExport(); toast('Esportazione annullata'); }
     else {
       const where = err && err.stack ? String(err.stack).split('\n').slice(0, 2).join(' | ') : '';
@@ -4464,7 +4471,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T03:36:59';
+const APP_BUILD = '2026-11-13T03:48:36';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
@@ -4507,6 +4514,16 @@ if (gClientId) loadGis().catch(() => {});
 window.addEventListener('resize', () => renderTimeline());
 sizePreview(); renderTimeline(); renderInspector(); updateTime();
 T = 0; updateTime(); draw();
+// l'ultimo export si è interrotto perché la pagina è stata chiusa (di solito memoria piena su iPhone): lo dico chiaramente
+setTimeout(() => {
+  let x = null; try { x = JSON.parse(localStorage.getItem('moviola:xlog') || 'null'); localStorage.removeItem('moviola:xlog'); } catch(e){}
+  if (!x || Date.now() - x.at > 6*3600e3) return;
+  scrim.innerHTML = `<div class="sheet" role="dialog" aria-modal="true"><h3>Export interrotto</h3>
+    <p class="err">L'ultimo export si è fermato al ${Math.round((x.p || 0)*100)}% — fase: «${esc(String(x.phase || ''))}» — ${x.res}p, ${x.fps} fps, video di ${x.dur} s.</p>
+    <p class="note">Il browser ha chiuso Moviola prima della fine, di solito perché il telefono ha finito la memoria. Prova con <b>720p</b>, oppure esporta dal computer. Se mandi uno screenshot di questo messaggio si capisce il punto esatto.</p>
+    <div class="row"><button class="btn primary" id="xlClose">Ho capito</button></div></div>`;
+  scrim.hidden = false; $('#xlClose').onclick = closeExport;
+}, 1500);
 (async () => {
   try {
     let all = await dbGetAll('projects');
