@@ -311,6 +311,7 @@ body.clipdrag .clip.sel{opacity:.9;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:
   body.has-sel .hgutter,body.lib-open .hgutter{display:flex;grid-column:3;grid-row:2;margin:0;height:16px}
   .hgutter::before{width:54px;height:5px}
   .tl-wrap{grid-column:3;grid-row:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+  .tl-wrap{overscroll-behavior:contain;scrollbar-width:thin}
   .libstrip{grid-column:3;grid-row:3;min-height:0;align-self:start}
   .libstrip .lcard{min-height:0;width:84px;padding:4px;gap:2px;font-size:11px}
   .libstrip .lcard .lthumb{height:26px}
@@ -2310,7 +2311,11 @@ $('#zoom').addEventListener('input', e => {
 // pizzico con due dita sulla timeline = zoom (cambia solo la vista, non il video)
 let pinch = null;
 const tDist = e => Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+// un dito in su/giù sulla timeline: quando è più alta del suo riquadro (telefono in orizzontale) scorre in verticale
+let vpan = null;
+const tlWrap = $('.tl-wrap');
 scroller.addEventListener('touchstart', e => {
+  vpan = e.touches.length === 1 && tlWrap.scrollHeight > tlWrap.clientHeight + 2 ? { x:e.touches[0].clientX, y:e.touches[0].clientY, st:tlWrap.scrollTop, on:false } : null;
   if (e.touches.length !== 2) return;
   drag = null;
   const rect = scroller.getBoundingClientRect();
@@ -2318,11 +2323,16 @@ scroller.addEventListener('touchstart', e => {
   pinch = { d0:tDist(e), pps0:pps, tAt:tOf(scroller.scrollLeft + mx), mx };
 }, { passive:true });
 scroller.addEventListener('touchmove', e => {
+  if (vpan && e.touches.length === 1 && (!drag || drag.kind === 'tap')){
+    const dx = e.touches[0].clientX - vpan.x, dy = e.touches[0].clientY - vpan.y;
+    if (!vpan.on && Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)*1.2){ vpan.on = true; drag = null; }
+    if (vpan.on){ e.preventDefault(); tlWrap.scrollTop = vpan.st - dy; return; }
+  }
   if (!pinch || e.touches.length !== 2) return;
   e.preventDefault();
   zoomTo(pinch.pps0 * Math.pow(tDist(e) / pinch.d0, 2.6), pinch.tAt, pinch.mx);
 }, { passive:false });
-scroller.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
+scroller.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; if (!e.touches.length) vpan = null; });
 // Mac: pizzico sul trackpad (arriva come rotella con ctrl), ⌘/⌥ + rotella, gesti di Safari
 function zoomAround(newPps, clientX){
   const rect = scroller.getBoundingClientRect(), mx = clientX != null ? clientX - rect.left : scroller.clientWidth/2;
@@ -4490,7 +4500,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T10:16:08';
+const APP_BUILD = '2026-11-13T10:20:59';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
