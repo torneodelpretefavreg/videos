@@ -305,7 +305,10 @@ body.clipdrag .clip.sel{opacity:.9;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:
   .gutter[data-gut="insp"]{display:flex;grid-column:2;grid-row:1 / 5;align-self:stretch;justify-content:center;align-items:center;cursor:col-resize;touch-action:none;min-height:0}
   .gutter[data-gut="insp"]::before{content:"";width:5px;height:54px;border-radius:3px;background:var(--line)}
   .gutter.on::before{background:var(--accent)}
-  .transport .round{width:30px;height:30px}.transport .round.big{width:38px;height:38px}.transport .round svg{width:15px;height:15px}
+  /* i 7 tasti stanno sempre su una riga sola, anche con l'anteprima stretta */
+  .transport .round{width:min(30px,calc((100% - 60px)/6));height:auto;aspect-ratio:1;min-width:0;padding:0}.transport .round.big{width:38px;height:38px}.transport .round svg{width:15px;height:15px}
+  .transport{align-self:end}
+  .tools{align-self:end}
   #seek{height:20px}
   .hgutter{display:none}
   body.has-sel .hgutter,body.lib-open .hgutter{display:flex;grid-column:3;grid-row:2;margin:0;height:16px}
@@ -1987,7 +1990,7 @@ function renderTimeline(){
   $('#trV').innerHTML = v;
   // texts: righe separate quando si sovrappongono
   const mob = window.matchMedia('(max-width:959px)').matches;
-  const VH = Math.round((mob ? 46 : 56)*tlScale), RH = Math.round(24*Math.min(tlScale, 1.5)), GAP = 4;
+  const VH = Math.round((mob ? 46 : 56)*tlScale), RH = Math.round(24*clamp(tlScale, 1, 1.5)), GAP = 4;   // testi e audio mai più bassi della misura normale: le scritte restavano tagliate a metà
   const rows = [], rowOf = new Map();
   [...P.texts].sort((a,b) => a.start - b.start).forEach(x => {
     let r = rows.findIndex(end => end <= x.start + 0.001);
@@ -2001,7 +2004,7 @@ function renderTimeline(){
     if (r < 0){ r = arows.length; arows.push(0); }
     arows[r] = a.start + audLen(a); arowOf.set(a.id, r);
   });
-  const nA = Math.max(1, arows.length), AH = Math.round(22*Math.min(tlScale, 1.6));
+  const nA = Math.max(1, arows.length), AH = Math.round(22*clamp(tlScale, 1, 1.6));
   // traccia sopra: righe separate quando si sovrappongono
   const orows = [], orowOf = new Map();
   [...(P.overlays || [])].sort((a,b) => a.start - b.start).forEach(o => {
@@ -4503,7 +4506,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T13:19:50';
+const APP_BUILD = '2026-11-13T14:19:21';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
