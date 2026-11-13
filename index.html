@@ -4067,8 +4067,22 @@ async function exportVideoInner(opt, onProg, signal){
   if (signal.aborted) throw new DOMException('abort','AbortError');
   if (mix) audioMode = acfg && opt.audioRec !== true ? 'aac' : 'realtime';
 
-  const target = new Mp4Muxer.ArrayBufferTarget();
-  const mopts = { target, video:{ codec:'avc', width:W, height:H, frameRate:fps }, fastStart:'in-memory', firstTimestampBehavior:'offset' };
+  // il video finito si raccoglie a pezzi: prima stava tutto in un unico blocco di memoria che, crescendo, si copiava
+  // raddoppiando lo spazio → su iPhone Safari si chiudeva (pagina bianca) proprio alla fine dell'export
+  const parts = []; let outSize = 0;
+  const writePart = (data, pos) => {
+    const d = data.slice();
+    if (pos >= outSize){ parts.push({ pos, buf:d }); outSize = pos + d.length; return; }
+    let o = 0;   // riscrittura di una parte già scritta (es. intestazione aggiornata alla fine)
+    for (const p of parts){
+      const a = Math.max(pos + o, p.pos), b = Math.min(pos + d.length, p.pos + p.buf.length);
+      if (a < b){ p.buf.set(d.subarray(a - pos, b - pos), a - p.pos); o = b - pos; }
+    }
+    if (pos + d.length > outSize){ const rest = d.subarray(outSize - pos); parts.push({ pos:outSize, buf:rest.slice() }); outSize = pos + d.length; }
+  };
+  const streamed = typeof Mp4Muxer.StreamTarget === 'function';
+  const target = streamed ? new Mp4Muxer.StreamTarget({ onData:writePart, chunked:true, chunkSize:4*1048576 }) : new Mp4Muxer.ArrayBufferTarget();
+  const mopts = { target, video:{ codec:'avc', width:W, height:H, frameRate:fps }, fastStart:streamed ? false : 'in-memory', firstTimestampBehavior:'offset' };
   if (audioMode === 'aac') mopts.audio = { codec:'aac', numberOfChannels:2, sampleRate:SR };
   const muxer = new Mp4Muxer.Muxer(mopts);
   let encErr = null;
@@ -4225,7 +4239,8 @@ async function exportVideoInner(opt, onProg, signal){
   await ve.flush(); ve.close();
   if (encErr) throw encErr;
   muxer.finalize();
-  let blob = new Blob([target.buffer], { type:'video/mp4' });
+  let blob = streamed ? new Blob(parts.sort((a,b) => a.pos - b.pos).map(p => p.buf), { type:'video/mp4' }) : new Blob([target.buffer], { type:'video/mp4' });
+  parts.length = 0;
   // controllo: riapro il file e misuro se l'audio si sente davvero; se è muto passo al registratore di sistema
   if (audioMode === 'aac'){
     onProg({ phase:'Controllo l’audio del file…', p:1 });
@@ -4449,7 +4464,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T03:25:33';
+const APP_BUILD = '2026-11-13T03:36:59';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
