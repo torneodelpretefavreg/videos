@@ -1684,7 +1684,7 @@ function loadVideo(file, fixedId){
     el.addEventListener('loadedmetadata', () => {
       clearTimeout(to); clearTimeout(kick); if (!el.paused) el.pause();
       const m = { id:fixedId || uid(), type:'video', name:file.name, url, el, file, w:el.videoWidth, h:el.videoHeight, duration:isFinite(el.duration) ? el.duration : 10, thumb:'' };
-      el.addEventListener('seeked', requestDraw);
+      el.addEventListener('seeked', () => onSeeked(m));
       el.addEventListener('loadeddata', requestDraw);
       res(m);
     }, { once:true });
@@ -1861,12 +1861,31 @@ function seekPreview(fast){
     const m = media.get(o.c.mediaId);
     if (m){
       const tgt = clamp(o.c.in + (T - o.start)*spd(o.c), 0, m.duration - 0.001);
-      if (Math.abs(m.el.currentTime - tgt) > 0.015){
-        if (fast === true && typeof m.el.fastSeek === 'function') m.el.fastSeek(tgt); else m.el.currentTime = tgt;
-      }
+      seekVideo(m, tgt, fast === true);
     }
   }
   requestDraw();
+}
+// mentre scorri la linea rossa: un solo spostamento alla volta. Se il video sta ancora cercando il fotogramma,
+// tengo da parte l'ultima posizione e la applico appena ha finito (prima ogni nuova posizione annullava la precedente
+// e l'immagine restava ferma finché non lasciavi il dito)
+function seekVideo(m, tgt, fast){
+  const el = m.el;
+  if (el.seeking){ m._want = tgt; m._wantFast = fast; return; }
+  if (Math.abs(el.currentTime - tgt) <= 0.015 && m._want == null){ requestDraw(); return; }
+  m._want = null;
+  if (fast && typeof el.fastSeek === 'function') el.fastSeek(tgt); else el.currentTime = tgt;
+}
+function onSeeked(m){
+  const el = m.el;
+  if (m._want != null){
+    const t = m._want, f = m._wantFast; m._want = null;
+    if (Math.abs(el.currentTime - t) > 0.015){ if (f && typeof el.fastSeek === 'function') el.fastSeek(t); else el.currentTime = t; }
+  }
+  requestDraw();
+  // Safari a volte disegna ancora il fotogramma vecchio subito dopo il seek: ridisegno quando quello nuovo è davvero pronto
+  if (el.requestVideoFrameCallback) try { el.requestVideoFrameCallback(() => requestDraw()); } catch(e){}
+  setTimeout(requestDraw, 90);
 }
 function setT(t){ T = clamp(t, 0, total()); if (playing){ clock = { t0:performance.now(), p0:T }; syncMedia(true); } else seekPreview(); updateTime(); placePlayhead(); }
 function setPlayIcon(){
@@ -2407,7 +2426,7 @@ function renderInspector(){
       <div class="grp"><label class="lab" for="pname">Nome</label><input class="tin" id="pname" value="${esc(P.name || '')}" placeholder="Es. Highlights 1ª giornata" autocomplete="off"></div>
       <div class="stats"><div class="stat"><b>${P.clips.length}</b><span>clip</span></div><div class="stat"><b>${P.texts.length}</b><span>testi</span></div><div class="stat"><b>${fmtT(tot).replace(/\.\d+$/,'')}</b><span>durata</span></div></div>
       <p class="note">Tocca una clip o un testo nella timeline per modificarlo. Trascina le maniglie gialle per tagliare, oppure porta la linea rossa dove vuoi e usa <b>Dividi</b>.</p>
-      <p class="note">Da tastiera: <span class="kbd">Spazio</span> riproduci, <span class="kbd">S</span> dividi, <span class="kbd">Canc</span> elimina, <span class="kbd">⌘Z</span> annulla, <span class="kbd">⌘ + clic</span> selezione multipla, <span class="kbd">⌘C</span> <span class="kbd">⌘X</span> <span class="kbd">⌘V</span> copia, taglia, incolla, <span class="kbd">⌘A</span> seleziona tutto, <span class="kbd">⌘D</span> duplica.</p>`;
+      <p class="note">Da tastiera: <span class="kbd">Spazio</span> riproduci, <span class="kbd">⌘B</span> o <span class="kbd">S</span> taglia, <span class="kbd">Canc</span> elimina, <span class="kbd">⌘Z</span> annulla, <span class="kbd">⌘ + clic</span> selezione multipla, <span class="kbd">⌘C</span> <span class="kbd">⌘X</span> <span class="kbd">⌘V</span> copia, taglia, incolla, <span class="kbd">⌘A</span> seleziona tutto, <span class="kbd">⌘D</span> duplica.</p>`;
   } else if (sel.type === 'clip'){
     const c = o, m = media.get(c.mediaId);
     const idx = P.clips.indexOf(c);
@@ -3345,6 +3364,7 @@ document.addEventListener('keydown', e => {
     if (k === 'x'){ e.preventDefault(); copySel(true); return; }
     if (k === 'a'){ e.preventDefault(); selectAll(); return; }
     if (k === 'd'){ e.preventDefault(); if (copySel(false)) pasteInternal(); return; }
+    if (k === 'b'){ e.preventDefault(); split(); return; }   // ⌘B: taglia alla linea rossa, come su Final Cut
     if (k === 'v') return;   // gestito dall'evento "incolla"
   }
   if (e.code === 'Space'){ e.preventDefault(); playing ? pause() : play(); }
@@ -4387,7 +4407,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-08T00:01:16';
+const APP_BUILD = '2026-11-13T01:59:23';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
