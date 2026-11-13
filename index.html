@@ -4341,12 +4341,46 @@ async function saveVideo(blob, name){
     return;
   }
   const file = new File([blob], name, { type:'video/mp4' });
-  if (/iP(hone|ad|od)/.test(navigator.userAgent) && navigator.canShare && navigator.canShare({ files:[file] })){
-    try { await navigator.share({ files:[file] }); return; } catch(e){ if (e.name === 'AbortError') return; }
+  const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let why = '';
+  if (navigator.share){
+    try { await navigator.share({ files:[file] }); return; }
+    catch(e){ if (e && e.name === 'AbortError') return; why = (e && (e.name + (e.message ? ': ' + e.message : ''))) || 'errore'; }
+  } else why = 'condivisione non disponibile';
+  if (!isIOS){
+    const a = document.createElement('a'); a.href = lastUrl || URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    toast('Download avviato'); return;
   }
-  const a = document.createElement('a'); a.href = lastUrl || URL.createObjectURL(blob); a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  toast('Download avviato');
+  // iPhone/iPad: il link di download apre solo una pagina bianca (soprattutto dall'icona sulla schermata Home).
+  // Offro di riprovare la condivisione o di mettere il video su Google Drive, da dove si salva nel rullino.
+  iosSaveHelp(blob, name, why);
+}
+function iosSaveHelp(blob, name, why){
+  const sh = scrim.querySelector('.sheet'); if (!sh) return;
+  const mb = (blob.size/1048576).toFixed(0);
+  sh.innerHTML = `<h3>Salva sul telefono</h3>
+    <p class="note">iPhone non ha aperto il menu per salvare il video (${esc(why)}). Hai due strade:</p>
+    <div class="row"><button class="btn primary" id="ioShare">Riprova: Condividi → Salva video</button></div>
+    <div class="row"><button class="btn" id="ioDrive">${driveReady() ? 'Mettilo su Google Drive' : 'Collega Drive e mettilo lì'}</button></div>
+    <p class="note" id="ioMsg">Da Drive lo apri con l'app Google Drive → ⋯ → <b>Invia una copia</b> → <b>Salva video</b>. Il file è di ${mb} MB.</p>
+    <div class="row"><button class="btn" id="ioClose">Chiudi</button></div>`;
+  $('#ioClose').onclick = closeExport;
+  $('#ioShare').onclick = async () => {
+    const file = new File([blob], name, { type:'video/mp4' });
+    try { await navigator.share({ files:[file] }); closeExport(); }
+    catch(e){ if (e && e.name === 'AbortError') return; $('#ioMsg').innerHTML = `Ancora niente (${esc(e && e.name || 'errore')}). Usa Google Drive qui sotto.`; }
+  };
+  $('#ioDrive').onclick = async () => {
+    const btn = $('#ioDrive'), msg = $('#ioMsg');
+    try {
+      if (!driveReady()) await driveConnect();
+      btn.disabled = true;
+      const id = await driveUpload(new File([blob], name, { type:'video/mp4' }), name, p => { msg.textContent = `Carico su Drive… ${Math.round(p*100)}%`; });
+      const url = `https://drive.google.com/file/d/${id}/view`;
+      msg.innerHTML = `Fatto: è nella cartella <b>Moviola</b> del tuo Drive come <b>${esc(name)}</b>.<br><a class="btn primary" href="${url}" target="_blank" rel="noopener">Apri su Drive</a><br>Nell'app Drive: ⋯ → <b>Invia una copia</b> → <b>Salva video</b>.`;
+    } catch(e){ btn.disabled = false; msg.textContent = 'Non sono riuscito a caricarlo su Drive: ' + (e && e.message || e); }
+  };
 }
 $('#btnExport').onclick = openExport;
 
@@ -4415,7 +4449,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T03:10:14';
+const APP_BUILD = '2026-11-13T03:25:33';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
