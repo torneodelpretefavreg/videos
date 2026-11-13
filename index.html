@@ -583,11 +583,18 @@ function scheduleSave(){
   setSaveState('Modificato');
   clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 700);
 }
+// firma del progetto senza i dati dei file: se non è cambiata non salvo e non invio niente.
+// Prima anche solo aprire "Progetti" reinviava il progetto con un orario nuovo: un dispositivo rimasto indietro
+// poteva così sovrascrivere le modifiche fatte su un altro.
+let lastSavedSig = '';
+function projSig(){ const { mediaMeta, ...rest } = P; try { return projectId + '|' + JSON.stringify(rest); } catch(e){ return String(Math.random()); } }
 async function saveNow(){
   clearTimeout(saveTimer);
   if (!dbOK) return;
   if (blankStart && isEmptyProject(P)){ setSaveState(''); return; }
   if (isDeletedId(projectId)) return;
+  const sig = projSig();
+  if (sig === lastSavedSig){ setSaveState(fbUser ? 'Sincronizzato' : 'Salvato'); return; }
   blankStart = false;
   let thumb = '';
   try {
@@ -603,6 +610,7 @@ async function saveNow(){
   try {
     const rec = { id:projectId, name:P.name || 'Senza titolo', updated:Date.now(), duration:total(), thumb, P:JSON.parse(JSON.stringify(P)) };
     await dbPut('projects', rec);
+    lastSavedSig = sig;
     try { localStorage.setItem('moviola:last', projectId); } catch(e){}
     setSaveState('Salvato');
     if (fbUser) pushProject(rec);
@@ -1115,7 +1123,7 @@ async function loadProjectInner(rec){
     } catch(e){ missing++; }
   }
   try { localStorage.setItem('moviola:last', projectId); } catch(e){}
-  setSaveState('Salvato');
+  lastSavedSig = projSig(); setSaveState('Salvato');
   refresh(true);
   if (pendingRelink.length) toast(`Ricarica con + Media: ${pendingRelink.map(p => p.name).join(', ')}. Tagli e testi restano come li avevi lasciati.`, 8000);
   else if (missing) toast(`${missing} file non trovati sul dispositivo: ricaricali e rimettili nella timeline.`, 5000);
@@ -4407,7 +4415,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T01:59:23';
+const APP_BUILD = '2026-11-13T03:10:14';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
