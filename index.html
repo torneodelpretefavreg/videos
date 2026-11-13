@@ -295,21 +295,30 @@ body.clipdrag .clip.sel{opacity:.9;box-shadow:0 6px 20px rgba(0,0,0,.6);z-index:
   .brand{font-size:17px}
   .top .btn{min-height:30px;padding:4px 10px;font-size:13px}
   .top .round{width:30px;height:30px}
-  .layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);grid-template-rows:minmax(0,1fr) auto auto;gap:4px 8px;min-height:0}
+  /* colonne: anteprima | divisore | timeline e pannelli. Righe: timeline | divisore | pannello sotto | strumenti */
+  .layout{display:grid;grid-template-columns:var(--lsL,44%) 16px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 0 auto auto;gap:4px 0;min-height:0}
+  body.has-sel .layout,body.lib-open .layout{grid-template-rows:var(--lsR1,minmax(0,1fr)) 16px var(--lsR3,auto) auto}
   .main{display:contents}
-  .stage{grid-column:1;grid-row:1 / 3;min-height:0}
-  .transport{grid-column:1;grid-row:3;gap:3px}
+  .stage{grid-column:1;grid-row:1 / 4;min-height:0}
+  #cv{max-height:calc(100vh - 150px);max-height:calc(100dvh - 150px)}
+  .transport{grid-column:1;grid-row:4;gap:3px}
+  .gutter[data-gut="insp"]{display:flex;grid-column:2;grid-row:1 / 5;align-self:stretch;justify-content:center;align-items:center;cursor:col-resize;touch-action:none;min-height:0}
+  .gutter[data-gut="insp"]::before{content:"";width:5px;height:54px;border-radius:3px;background:var(--line)}
+  .gutter.on::before{background:var(--accent)}
   .transport .round{width:30px;height:30px}.transport .round.big{width:38px;height:38px}.transport .round svg{width:15px;height:15px}
   #seek{height:20px}
   .hgutter{display:none}
-  .tl-wrap{grid-column:2;grid-row:1;min-height:0;overflow-y:auto;overflow-x:hidden}
-  .libstrip{grid-column:2;grid-row:2}
+  body.has-sel .hgutter,body.lib-open .hgutter{display:flex;grid-column:3;grid-row:2;margin:0;height:16px}
+  .hgutter::before{width:54px;height:5px}
+  .tl-wrap{grid-column:3;grid-row:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+  .libstrip{grid-column:3;grid-row:3;min-height:0;align-self:start}
   .libstrip .lcard{min-height:0;width:84px;padding:4px;gap:2px;font-size:11px}
   .libstrip .lcard .lthumb{height:26px}
   .libstrip .lcard.tgt .sw2 i{padding:2px 0}
-  .tools{grid-column:2;grid-row:3}
+  .tools{grid-column:3;grid-row:4}
   .tool{padding:5px 1px 4px;font-size:10px}.tool svg{width:16px;height:16px}
-  .insp{grid-column:2;grid-row:2 / 4;max-height:56vh}
+  .insp{grid-column:3;grid-row:3 / 5;max-height:56vh;min-height:0}
+  html.ls-rows .insp{max-height:none;overflow-y:auto}
   body.has-sel .stage{min-height:0}
   .hint{display:none}
 }
@@ -2238,19 +2247,27 @@ function applyLayout(){
   const r = document.documentElement.style, L = layoutPrefs;
   if (L.libW) r.setProperty('--libW', L.libW + 'px'); else r.removeProperty('--libW');
   if (L.inspW) r.setProperty('--inspW', L.inspW + 'px'); else r.removeProperty('--inspW');
+  // telefono in orizzontale: larghezza dell'anteprima (in %) e altezza della timeline (in px)
+  if (L.lsL) r.setProperty('--lsL', L.lsL + '%'); else r.removeProperty('--lsL');
+  if (L.lsR1){ r.setProperty('--lsR1', L.lsR1 + 'px'); r.setProperty('--lsR3', 'minmax(0,1fr)'); } else { r.removeProperty('--lsR1'); r.removeProperty('--lsR3'); }
+  document.documentElement.classList.toggle('ls-rows', !!L.lsR1);
   tlScale = Math.min(L.tl || 1, window.matchMedia('(max-width:959px)').matches ? 1.45 : 2.4);   // sul telefono non oltre, altrimenti gli strumenti escono dallo schermo
   r.setProperty('--pvCut', Math.round((tlScale - 1)*240) + 'px');
 }
 function saveLayout(){ try { localStorage.setItem('moviola:layout', JSON.stringify(layoutPrefs)); } catch(e){} }
 applyLayout();
+const isPhoneLandscape = () => window.matchMedia('(max-width:959px) and (orientation:landscape)').matches;
 function startResize(e, kind){
   e.preventDefault();
   const g = e.currentTarget; g.setPointerCapture(e.pointerId); g.classList.add('on');
   document.body.classList.add('resizing', kind === 'tl' ? 'rz-row' : 'rz-col');
   const x0 = e.clientX, y0 = e.clientY;
   const lib0 = $('#libSide').getBoundingClientRect().width, insp0 = $('#insp').getBoundingClientRect().width, tl0 = tlScale;
+  const ls = isPhoneLandscape(), lay = $('.layout').getBoundingClientRect(), tlh0 = $('.tl-wrap').getBoundingClientRect().height;
   const mv = ev => {
-    if (kind === 'lib') layoutPrefs.libW = Math.round(clamp(lib0 + ev.clientX - x0, 190, 520));
+    if (ls && kind === 'insp') layoutPrefs.lsL = Math.round(clamp((ev.clientX - lay.left)/lay.width*100, 24, 68));
+    else if (ls && kind === 'tl') layoutPrefs.lsR1 = Math.round(clamp(tlh0 + ev.clientY - y0, 64, lay.height - 120));
+    else if (kind === 'lib') layoutPrefs.libW = Math.round(clamp(lib0 + ev.clientX - x0, 190, 520));
     else if (kind === 'insp') layoutPrefs.inspW = Math.round(clamp(insp0 - (ev.clientX - x0), 260, 560));
     else layoutPrefs.tl = Math.round(clamp(tl0 - (ev.clientY - y0)/160, 0.7, window.matchMedia('(max-width:959px)').matches ? 1.45 : 2.4)*100)/100;
     applyLayout();
@@ -2265,10 +2282,10 @@ function startResize(e, kind){
 }
 document.querySelectorAll('.gutter').forEach(g => {
   g.addEventListener('pointerdown', e => startResize(e, g.dataset.gut));
-  g.addEventListener('dblclick', () => { delete layoutPrefs[g.dataset.gut === 'lib' ? 'libW' : 'inspW']; applyLayout(); saveLayout(); renderTimeline(); });
+  g.addEventListener('dblclick', () => { delete layoutPrefs[isPhoneLandscape() ? 'lsL' : g.dataset.gut === 'lib' ? 'libW' : 'inspW']; applyLayout(); saveLayout(); renderTimeline(); });
 });
 $('#gutTl').addEventListener('pointerdown', e => startResize(e, 'tl'));
-$('#gutTl').addEventListener('dblclick', () => { delete layoutPrefs.tl; applyLayout(); saveLayout(); renderTimeline(); });
+$('#gutTl').addEventListener('dblclick', () => { delete layoutPrefs[isPhoneLandscape() ? 'lsR1' : 'tl']; applyLayout(); saveLayout(); renderTimeline(); });
 // zoom fluido: tanti eventi nello stesso fotogramma = un solo ridisegno della timeline
 let zoomRaf = 0, zoomAnchor = null, zoomFull = 0;
 function zoomTo(newPps, tAt, mx){
@@ -4473,7 +4490,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-13T08:26:07';
+const APP_BUILD = '2026-11-13T10:16:08';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
