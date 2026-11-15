@@ -140,7 +140,8 @@ body.theater .transport{position:fixed;left:0;right:0;bottom:0;z-index:61;backgr
 .bar .bname{position:relative}
 .bar .h{width:12px}.bar .h::before{left:5px}
 .playhead{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--rec);pointer-events:none;z-index:5}
-.playhead::before{content:"";position:absolute;top:0;left:-6px;border:7px solid transparent;border-top:9px solid var(--rec)}
+.playhead::before{content:"";position:absolute;top:0;left:-6px;border:7px solid transparent;border-top:9px solid var(--rec);transform:translateY(var(--sy,0px))}
+.phgrip{position:absolute;top:0;left:-16px;width:32px;height:26px;pointer-events:auto;touch-action:none;cursor:ew-resize;transform:translateY(var(--sy,0px))}
 .zoomrow{display:flex;align-items:center;gap:8px;padding:6px 12px 0;font-family:var(--f-cond);font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
 .zoomrow input{flex:1;max-width:220px}
 .snapbtn{min-height:28px;padding:2px 8px;gap:5px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;background:var(--raise);color:var(--muted);border-color:var(--line);backdrop-filter:none}
@@ -438,7 +439,7 @@ body:has(#scrim:not([hidden])) .pastebar{display:none}
             <div class="track" id="trV"></div>
             <div class="track" id="trT"></div>
             <div class="track" id="trA"></div>
-            <div class="playhead" id="ph"></div>
+            <div class="playhead" id="ph"><i class="phgrip"></i></div>
             <div class="dropmark" id="dropmark" hidden></div>
           </div>
         </div>
@@ -1948,6 +1949,8 @@ function thumbUrl(m){
 }
 const inner = $('#tlInner'), scroller = $('#tlScroll');
 function placePlayhead(){ $('#ph').style.left = xOf(T) + 'px'; }
+// la testina della linea rossa resta sempre visibile sotto il righello, anche quando la timeline è scorsa in basso
+scroller.addEventListener('scroll', () => { inner.style.setProperty('--sy', scroller.scrollTop + 'px'); }, { passive:true });
 function followPlayhead(){
   const x = xOf(T), l = scroller.scrollLeft, w = scroller.clientWidth;
   if (x > l + w - 40) scroller.scrollLeft = x - 60;
@@ -2057,7 +2060,7 @@ let drag = null;
 inner.addEventListener('pointerdown', e => {
   const h = e.target.closest('.h');
   const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]'), audEl = e.target.closest('[data-audio]'), ovEl0 = e.target.closest('[data-over]');
-  const onRuler = e.target.closest('#ruler');
+  const onRuler = e.target.closest('#ruler,.phgrip');
   if (onRuler){
     pause(); drag = { kind:'scrub' }; inner.setPointerCapture(e.pointerId);
     scrubTo(e); e.preventDefault(); return;
@@ -4511,7 +4514,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-15T01:21:07';
+const APP_BUILD = '2026-11-15T01:41:15';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
