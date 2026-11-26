@@ -1897,19 +1897,21 @@ function seekPreview(fast){
 // e l'immagine restava ferma finché non lasciavi il dito)
 function seekVideo(m, tgt, fast){
   const el = m.el;
-  // video in streaming da Drive: mentre trascini salto al fotogramma chiave più vicino (scarica molto meno), preciso quando lasci
-  if (m.remote && drag && drag.kind === 'scrub') fast = true;
-  // se una ricerca resta appesa (rete lenta/bloccata) non aspetto per sempre: dopo 1,2 s la riavvio sulla posizione nuova
-  if (el.seeking && performance.now() - (m._seekT || 0) < 1200){ m._want = tgt; m._wantFast = fast; return; }
+  // niente "salto al fotogramma chiave" mentre trascini: nei video XbotGo i fotogrammi chiave sono ogni ~1,2 s
+  // e l'immagine restava ferma sullo stesso fotogramma. Sempre il fotogramma esatto, una ricerca alla volta.
+  fast = false;
+  // se una ricerca resta davvero appesa (rete bloccata) non aspetto per sempre: dopo 6 s la riavvio.
+  // (prima erano 1,2 s: in streaming una ricerca ci mette di più, veniva annullata di continuo e l'immagine non cambiava mai)
+  if (el.seeking && performance.now() - (m._seekT || 0) < 6000){ m._want = tgt; m._wantFast = fast; return; }
   if (!el.seeking && Math.abs(el.currentTime - tgt) <= 0.015 && m._want == null){ requestDraw(); return; }
   m._want = null; m._seekT = performance.now();
-  if (fast && typeof el.fastSeek === 'function') el.fastSeek(tgt); else el.currentTime = tgt;
+  el.currentTime = tgt;
 }
 function onSeeked(m){
   const el = m.el;
   if (m._want != null){
     const t = m._want, f = m._wantFast; m._want = null;
-    if (Math.abs(el.currentTime - t) > 0.015){ m._seekT = performance.now(); if (f && typeof el.fastSeek === 'function') el.fastSeek(t); else el.currentTime = t; }
+    if (Math.abs(el.currentTime - t) > 0.015){ m._seekT = performance.now(); el.currentTime = t; }
   }
   requestDraw();
   // Safari a volte disegna ancora il fotogramma vecchio subito dopo il seek: ridisegno quando quello nuovo è davvero pronto
@@ -4514,7 +4516,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-15T01:41:15';
+const APP_BUILD = '2026-11-27T00:44:18';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
