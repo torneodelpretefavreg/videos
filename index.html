@@ -1909,7 +1909,7 @@ function seekVideo(m, tgt, fast){
   fast = false;
   // se una ricerca resta davvero appesa (rete bloccata) non aspetto per sempre: dopo 6 s la riavvio.
   // (prima erano 1,2 s: in streaming una ricerca ci mette di più, veniva annullata di continuo e l'immagine non cambiava mai)
-  if (el.seeking && performance.now() - (m._seekT || 0) < 6000){ m._want = tgt; m._wantFast = fast; return; }
+  if ((el.seeking || m._hold) && performance.now() - (m._seekT || 0) < 6000){ m._want = tgt; m._wantFast = fast; return; }
   if (!el.seeking && Math.abs(el.currentTime - tgt) <= 0.015 && m._want == null){ requestDraw(); return; }
   m._want = null; m._seekT = performance.now();
   if (m.remote){ bgHoldUntil = performance.now() + 2500; watchSeek(m); }
@@ -1932,14 +1932,24 @@ function watchSeek(m){
 }
 function onSeeked(m){
   const el = m.el;
-  if (m._want != null){
-    const t = m._want, f = m._wantFast; m._want = null;
-    if (Math.abs(el.currentTime - t) > 0.015){ m._seekT = performance.now(); if (m.remote){ bgHoldUntil = performance.now() + 2500; watchSeek(m); } el.currentTime = t; }
-  }
+  // prima faccio vedere il fotogramma appena trovato, POI passo alla posizione successiva.
+  // Prima ripartivo subito con la ricerca dopo: su Safari (Mac) il fotogramma nuovo non faceva in tempo
+  // a comparire e l'immagine si aggiornava solo quando ti fermavi.
+  m._hold = true;
+  let done = false;
+  const next = () => {
+    if (done) return; done = true; m._hold = false;
+    draw();
+    if (m._want != null){
+      const t = m._want; m._want = null;
+      if (Math.abs(el.currentTime - t) > 0.015){ m._seekT = performance.now(); if (m.remote){ bgHoldUntil = performance.now() + 2500; watchSeek(m); } el.currentTime = t; }
+    }
+  };
   requestDraw();
-  // Safari a volte disegna ancora il fotogramma vecchio subito dopo il seek: ridisegno quando quello nuovo è davvero pronto
-  if (el.requestVideoFrameCallback) try { el.requestVideoFrameCallback(() => requestDraw()); } catch(e){}
-  setTimeout(requestDraw, 90);
+  if (el.requestVideoFrameCallback) try { el.requestVideoFrameCallback(() => requestAnimationFrame(next)); } catch(e){}
+  setTimeout(next, 70);
+  // Safari a volte disegna ancora il fotogramma vecchio subito dopo il seek: un ultimo ridisegno di sicurezza
+  setTimeout(requestDraw, 160);
 }
 function setT(t){ T = clamp(t, 0, total()); if (playing){ clock = { t0:performance.now(), p0:T }; syncMedia(true); } else seekPreview(); updateTime(); placePlayhead(); }
 function setPlayIcon(){
@@ -4539,7 +4549,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-27T01:06:39';
+const APP_BUILD = '2026-11-27T01:54:20';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
