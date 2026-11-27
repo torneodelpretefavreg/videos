@@ -66,6 +66,7 @@ button{font:inherit;color:inherit;touch-action:manipulation}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 .main{display:flex;flex-direction:column;gap:8px;min-width:0}
+.seekbadge{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:5;background:rgba(10,12,16,.85);border:1px solid rgba(255,255,255,.16);border-radius:10px;padding:6px 12px;font-size:13px;color:#fff;pointer-events:none;white-space:nowrap}
 .stage{background:#05070a;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;padding:10px;position:relative;min-height:200px}
 #cv{display:block;max-width:100%;max-height:56vh;width:auto;height:auto;border-radius:4px;background:#000}
 .hint{position:absolute;left:10px;right:10px;bottom:10px;margin:auto;max-width:360px;background:rgba(14,18,24,.88);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;color:var(--muted);text-align:center;backdrop-filter:blur(6px)}
@@ -403,6 +404,7 @@ body:has(#scrim:not([hidden])) .pastebar{display:none}
     <div class="main">
       <section class="stage">
         <canvas id="cv"></canvas>
+        <div class="seekbadge" id="seekBadge" hidden></div>
         <div class="ov tl"><div class="chip tc" id="tc">0:00.00 <span>/ 0:00.00</span></div></div>
         <div class="ov tr">
           <button class="chip" id="btnSpeed" aria-label="Velocità anteprima">1×</button>
@@ -840,12 +842,17 @@ async function driveUpload(file, name, onp){
   }
   return id;
 }
+let bgHoldUntil = 0;
 async function driveDownload(fileId, onp){
   const r = await gfetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
   const total = +r.headers.get('Content-Length') || 0;
   if (!r.body || !total) return await r.blob();
   const rd = r.body.getReader(), parts = []; let got = 0;
-  for (;;){ const { done, value } = await rd.read(); if (done) break; parts.push(value); got += value.length; onp(Math.min(1, got/total)); }
+  for (;;){
+    // mentre scorri la timeline su un video in streaming il download si ferma un attimo: tutta la rete va al fotogramma che stai guardando
+    while (performance.now() < bgHoldUntil) await new Promise(r => setTimeout(r, 150));
+    const { done, value } = await rd.read(); if (done) break; parts.push(value); got += value.length; onp(Math.min(1, got/total));
+  }
   return new Blob(parts);
 }
 const driveFree = () => driveQuota ? driveQuota.limit - driveQuota.usage : Infinity;
@@ -1905,13 +1912,29 @@ function seekVideo(m, tgt, fast){
   if (el.seeking && performance.now() - (m._seekT || 0) < 6000){ m._want = tgt; m._wantFast = fast; return; }
   if (!el.seeking && Math.abs(el.currentTime - tgt) <= 0.015 && m._want == null){ requestDraw(); return; }
   m._want = null; m._seekT = performance.now();
+  if (m.remote){ bgHoldUntil = performance.now() + 2500; watchSeek(m); }
   el.currentTime = tgt;
+}
+// se il fotogramma in streaming tarda, lo dico invece di lasciare l'immagine ferma senza spiegazioni
+let seekBadgeT = 0;
+function watchSeek(m){
+  clearTimeout(seekBadgeT);
+  const b = $('#seekBadge');
+  const tick = () => {
+    const cur = media.get(m.id);
+    if (!cur || cur !== m || !m.remote || !m.el.seeking){ b.hidden = true; return; }
+    bgHoldUntil = performance.now() + 2500;
+    const p = bgLoading.has(m.id) ? ` · download sul computer ${Math.round(bgLoading.get(m.id)*100)}%` : '';
+    b.textContent = `Carico il fotogramma da Drive…${p}`; b.hidden = false;
+    seekBadgeT = setTimeout(tick, 300);
+  };
+  seekBadgeT = setTimeout(tick, 400);
 }
 function onSeeked(m){
   const el = m.el;
   if (m._want != null){
     const t = m._want, f = m._wantFast; m._want = null;
-    if (Math.abs(el.currentTime - t) > 0.015){ m._seekT = performance.now(); el.currentTime = t; }
+    if (Math.abs(el.currentTime - t) > 0.015){ m._seekT = performance.now(); if (m.remote){ bgHoldUntil = performance.now() + 2500; watchSeek(m); } el.currentTime = t; }
   }
   requestDraw();
   // Safari a volte disegna ancora il fotogramma vecchio subito dopo il seek: ridisegno quando quello nuovo è davvero pronto
@@ -4516,7 +4539,7 @@ scrim.addEventListener('click', e => { if (e.target === scrim && !abortCtl) clos
 
 
 /* ---------- aggiornamenti dell'app ---------- */
-const APP_BUILD = '2026-11-27T00:44:18';
+const APP_BUILD = '2026-11-27T01:06:39';
 const onPages = () => location.protocol === 'https:' && /\.github\.io$/.test(location.hostname);
 const BUILD_RE = new RegExp("APP_" + "BUILD = '([0-9T:.-]+)'");
 let lastUpdCheck = 0, updDismissed = null, userActed = false;
